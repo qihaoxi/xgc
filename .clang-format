@@ -1,0 +1,23 @@
+# xgc formatting style
+# Inherited from xcompiler: 4-space logical indentation, tabs for indentation,
+# conservative line wrapping.
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: ForIndentation
+ColumnLimit: 120
+BreakBeforeBraces: Attach
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortLoopsOnASingleLine: false
+IndentCaseLabels: true
+SortIncludes: false
+DerivePointerAlignment: false
+PointerAlignment: Left
+SpaceBeforeParens: ControlStatements
+SeparateDefinitionBlocks: Always
+
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+Cpp11BracedListStyle: false
+AlignArrayOfStructures: Left
