@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
 
 if (DEFINED XGC_PROJECT_ROOT)
     get_filename_component(XGC_PROJECT_ROOT "${XGC_PROJECT_ROOT}" ABSOLUTE)
