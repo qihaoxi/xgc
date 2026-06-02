@@ -19,6 +19,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(ENABLE_SHARED "Build shared xgc library" ON)
 option(ENABLE_EXAMPLES "Build xgc examples" ON)
 option(ENABLE_TESTS "Build xgc tests" ON)
+option(ENABLE_BENCHMARKS "Build xgc microbenchmarks" OFF)
 option(GC_MULTITHREAD "Enable multi-threading support (atomic RC + background GC)" OFF)
 
 include(${XGC_PROJECT_ROOT}/cmake/sanitizer.cmake)
@@ -99,6 +100,10 @@ endif ()
 if (ENABLE_TESTS)
     include(CTest)
     include(${XGC_PROJECT_ROOT}/cmake/tests.cmake)
+endif ()
+
+if (ENABLE_BENCHMARKS)
+    include(${XGC_PROJECT_ROOT}/cmake/benchmarks.cmake)
 endif ()
 
 include(${XGC_PROJECT_ROOT}/cmake/install.cmake)

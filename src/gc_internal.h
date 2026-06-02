@@ -60,6 +60,12 @@ typedef struct {
 	int        capacity;
 } GcWorklist;
 
+typedef struct {
+	uint8_t* bits;
+	size_t   bit_count;
+	size_t   byte_count;
+} GcBitmap;
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * 4. 运行时与线程内部结构
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -73,7 +79,9 @@ typedef enum {
 typedef struct {
 	uintptr_t owner_base;
 	size_t    owner_size;
-	uint8_t   dirty;
+	size_t    card_count;
+	size_t    dirty_card_count;
+	GcBitmap  dirty_map;
 } GcCardEntry;
 
 typedef struct {
@@ -95,6 +103,7 @@ typedef struct {
 typedef struct {
 	GcCardTable old_to_young;
 	size_t      dirty_old_objects;
+	size_t      dirty_cards;
 } GcBarrierSet;
 
 typedef struct {
@@ -151,14 +160,38 @@ void gc_heap_reset_young(GcRuntime* rt);
 void gc_heap_record_old_alloc(GcRuntime* rt, size_t bytes);
 void gc_heap_record_old_free(GcRuntime* rt, size_t bytes);
 
+/* bitmap substrate */
+void gc_bitmap_init(GcBitmap* bitmap, size_t bit_count);
+void gc_bitmap_destroy(GcBitmap* bitmap);
+int  gc_bitmap_resize(GcBitmap* bitmap, size_t bit_count);
+void gc_bitmap_clear_all(GcBitmap* bitmap);
+void gc_bitmap_set(GcBitmap* bitmap, size_t index);
+void gc_bitmap_clear(GcBitmap* bitmap, size_t index);
+int  gc_bitmap_test(const GcBitmap* bitmap, size_t index);
+
+typedef void (*GcVisitDirtyCardFn)(GcHeader* owner, size_t card_index, void* ctx);
+
+/* card-table substrate */
+void gc_card_table_init(GcCardTable* table, size_t card_granularity);
+void gc_card_table_destroy(GcCardTable* table);
+int  gc_card_table_register_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner, size_t owner_size);
+void gc_card_table_unregister_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner);
+void gc_card_table_mark_slot(GcRuntime* rt, GcCardTable* table, const GcHeader* owner, const void* slot_addr);
+void gc_card_table_mark_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner);
+int  gc_card_table_owner_is_dirty(const GcCardTable* table, const GcHeader* owner);
+void gc_card_table_clear_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner);
+void gc_card_table_visit_dirty(const GcCardTable* table, GcVisitDirtyCardFn visit, void* ctx);
+
 /* barrier/card-table substrate */
 void gc_barrier_set_init(GcBarrierSet* barriers, size_t card_granularity);
 void gc_barrier_set_destroy(GcBarrierSet* barriers);
 int  gc_barrier_register_owner(GcRuntime* rt, const GcHeader* owner, size_t owner_size);
 void gc_barrier_unregister_owner(GcRuntime* rt, const GcHeader* owner);
+void gc_barrier_mark_slot_dirty(GcRuntime* rt, const GcHeader* owner, const void* slot_addr);
 void gc_barrier_mark_owner_dirty(GcRuntime* rt, const GcHeader* owner);
 int  gc_barrier_is_owner_dirty(const GcRuntime* rt, const GcHeader* owner);
 void gc_barrier_clear_owner_dirty(GcRuntime* rt, const GcHeader* owner);
+void gc_barrier_visit_dirty_cards(const GcRuntime* rt, GcVisitDirtyCardFn visit, void* ctx);
 
 /* gc_worklist.c */
 void      gc_worklist_push(GcWorklist* wl, GcHeader* obj);
