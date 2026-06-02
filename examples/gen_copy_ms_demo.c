@@ -21,6 +21,20 @@ static void demo_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx)
 	}
 }
 
+static void demo_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
+	DemoNode* node = (DemoNode*)obj;
+	size_t    next_offset;
+
+	if (visit_slot == NULL) {
+		return;
+	}
+
+	next_offset = offsetof(DemoNode, next);
+	if (byte_begin <= next_offset && next_offset < byte_end && node->next != NULL) {
+		visit_slot((GcHeader**)&node->next, ctx);
+	}
+}
+
 static void demo_trace_edges(GcHeader* obj, GcVisitObjectFn visit_obj, void* ctx) {
 	DemoNode* node = (DemoNode*)obj;
 	if (node->next != NULL) {
@@ -44,6 +58,7 @@ static const GcDescriptor DEMO_NODE_DESC = {
 	.flags       = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
 	.kind        = 9,
 	.trace_slots = demo_trace_slots,
+	.trace_slots_range = demo_trace_slots_range,
 	.trace_edges = demo_trace_edges,
 	.finalize    = demo_finalize,
 };

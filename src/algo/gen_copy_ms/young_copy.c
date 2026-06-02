@@ -32,6 +32,60 @@ typedef struct {
 	GcWorklist*       wl;
 } GcGenMarkCtx;
 
+typedef struct {
+	GcGenMinorCtx* minor;
+	GcHeader**     owners_to_clear;
+	size_t         owner_count;
+	size_t         owner_capacity;
+} GcGenDirtyCardVisitCtx;
+
+static int gc_gen_dirty_visit_remember_owner(GcGenDirtyCardVisitCtx* visit_ctx, GcHeader* owner) {
+	GcHeader** new_items;
+	size_t     new_capacity;
+	size_t     i;
+
+	if (visit_ctx == NULL || owner == NULL) {
+		return 0;
+	}
+
+	for (i = 0; i < visit_ctx->owner_count; ++i) {
+		if (visit_ctx->owners_to_clear[i] == owner) {
+			return 1;
+		}
+	}
+
+	if (visit_ctx->owner_count == visit_ctx->owner_capacity) {
+		new_capacity = (visit_ctx->owner_capacity > 0u) ? (visit_ctx->owner_capacity * 2u) : 8u;
+		new_items    = (GcHeader**)realloc(visit_ctx->owners_to_clear, new_capacity * sizeof(*new_items));
+		if (new_items == NULL) {
+			return 0;
+		}
+
+		visit_ctx->owners_to_clear = new_items;
+		visit_ctx->owner_capacity  = new_capacity;
+	}
+
+	visit_ctx->owners_to_clear[visit_ctx->owner_count++] = owner;
+	return 1;
+}
+
+static void gc_gen_dirty_visit_clear_owners(GcGenDirtyCardVisitCtx* visit_ctx) {
+	size_t i;
+
+	if (visit_ctx == NULL || visit_ctx->minor == NULL) {
+		return;
+	}
+
+	for (i = 0; i < visit_ctx->owner_count; ++i) {
+		gc_barrier_clear_owner_dirty(visit_ctx->minor->rt, visit_ctx->owners_to_clear[i]);
+	}
+
+	free(visit_ctx->owners_to_clear);
+	visit_ctx->owners_to_clear = NULL;
+	visit_ctx->owner_count     = 0u;
+	visit_ctx->owner_capacity  = 0u;
+}
+
 static GcGenCopyMsState* gc_gen_state(GcRuntime* rt) {
 	return (GcGenCopyMsState*)((rt != NULL) ? rt->algo_state : NULL);
 }
@@ -147,7 +201,6 @@ static GcHeader* gc_gen_promote(GcGenMinorCtx* ctx, GcHeader* obj) {
 			ctx->rt->stats.peak_allocated = ctx->rt->stats.total_allocated;
 		}
 	}
-	gc_barrier_mark_owner_dirty(ctx->rt, copy);
 	gc_worklist_push(ctx->wl, copy);
 	return copy;
 }
@@ -170,20 +223,42 @@ static void gc_gen_minor_scan_handles(GcGenMinorCtx* ctx) {
 	}
 }
 
-static void gc_gen_minor_scan_old_objects(GcGenMinorCtx* ctx) {
-	GcGenOldNode* node;
-	if (ctx == NULL || ctx->state == NULL) {
+static void gc_gen_minor_visit_dirty_card(GcHeader* owner, size_t card_index, void* ctx) {
+	GcGenDirtyCardVisitCtx* visit_ctx = (GcGenDirtyCardVisitCtx*)ctx;
+	GcGenMinorCtx*          minor;
+	size_t                  card_size;
+	size_t                  byte_begin;
+	size_t                  byte_end;
+
+	if (visit_ctx == NULL || owner == NULL) {
 		return;
 	}
-	for (node = ctx->state->old_objects; node != NULL; node = node->next) {
-		if (!gc_barrier_is_owner_dirty(ctx->rt, node->obj)) {
-			continue;
-		}
-		if (node->obj != NULL && node->obj->desc != NULL && node->obj->desc->trace_slots != NULL) {
-			node->obj->desc->trace_slots(node->obj, gc_gen_evacuate_slot, ctx);
-		}
-		gc_barrier_clear_owner_dirty(ctx->rt, node->obj);
+
+	minor = visit_ctx->minor;
+	if (minor == NULL || minor->rt == NULL) {
+		return;
 	}
+
+	card_size  = minor->rt->barriers.old_to_young.card_granularity;
+	byte_begin = card_index * card_size;
+	byte_end   = byte_begin + card_size;
+	gc_trace_object_slots_in_range(owner, byte_begin, byte_end, gc_gen_evacuate_slot, minor);
+	if (!gc_gen_dirty_visit_remember_owner(visit_ctx, owner)) {
+		/* best-effort：即使无法记录 clear 列表，也不影响本轮可达性正确性 */
+	}
+}
+
+static void gc_gen_minor_scan_dirty_cards(GcGenMinorCtx* ctx) {
+	GcGenDirtyCardVisitCtx visit_ctx;
+
+	if (ctx == NULL || ctx->rt == NULL) {
+		return;
+	}
+
+	memset(&visit_ctx, 0, sizeof(visit_ctx));
+	visit_ctx.minor = ctx;
+	gc_barrier_visit_dirty_cards(ctx->rt, gc_gen_minor_visit_dirty_card, &visit_ctx);
+	gc_gen_dirty_visit_clear_owners(&visit_ctx);
 }
 
 static void gc_gen_minor_drain(GcGenMinorCtx* ctx) {
@@ -304,7 +379,7 @@ static void gc_gen_collect_minor_impl(GcRuntime* rt) {
 	if (rt->hooks.scan_roots != NULL) {
 		rt->hooks.scan_roots(rt->hooks.vm_ctx, gc_gen_evacuate_slot, &ctx);
 	}
-	gc_gen_minor_scan_old_objects(&ctx);
+	gc_gen_minor_scan_dirty_cards(&ctx);
 	gc_gen_minor_drain(&ctx);
 	rt->worklist_data     = wl.data;
 	rt->worklist_capacity = wl.capacity;
@@ -449,9 +524,8 @@ static void gc_gen_write_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeade
                                  GcHeader* old_value, GcHeader* new_value) {
 	GcGenCopyMsState* state;
 	(void)thread;
-	(void)slot;
 	(void)old_value;
-	if (rt == NULL || owner == NULL || new_value == NULL) {
+	if (rt == NULL || owner == NULL || slot == NULL || new_value == NULL) {
 		return;
 	}
 	state = gc_gen_state(rt);
@@ -464,7 +538,7 @@ static void gc_gen_write_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeade
 	if (!gc_gen_in_nursery(state, new_value)) {
 		return;
 	}
-	gc_barrier_mark_owner_dirty(rt, owner);
+	gc_barrier_mark_slot_dirty(rt, owner, slot);
 }
 
 static GcHeader* gc_gen_read_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeader** slot) {

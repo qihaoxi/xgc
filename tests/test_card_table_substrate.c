@@ -24,20 +24,20 @@ static void capture_dirty_card(GcHeader* owner, size_t card_index, void* ctx) {
 	DirtyCardCapture* capture = (DirtyCardCapture*)ctx;
 	assert(capture != NULL);
 	assert(capture->count < (sizeof(capture->owners) / sizeof(capture->owners[0])));
-	capture->owners[capture->count] = owner;
+	capture->owners[capture->count]       = owner;
 	capture->card_indices[capture->count] = card_index;
 	capture->count++;
 }
 
 int main(void) {
-	GcConfig          cfg;
-	GcVmHooks         hooks;
-	GcRuntime*        rt;
-	GcHeader*         owner_a;
-	GcHeader*         owner_b;
-	DirtyCardCapture  capture;
-	const size_t      owner_a_size = 96u;
-	const size_t      owner_b_size = 48u;
+	GcConfig         cfg;
+	GcVmHooks        hooks;
+	GcRuntime*       rt;
+	GcHeader*        owner_a;
+	GcHeader*        owner_b;
+	DirtyCardCapture capture;
+	const size_t     owner_a_size = 96u;
+	const size_t     owner_b_size = 48u;
 
 	gc_config_init_default(&cfg);
 	cfg.gc_region_size = 32u;
@@ -111,4 +111,3 @@ int main(void) {
 	gc_runtime_destroy(rt);
 	return EXIT_SUCCESS;
 }
-

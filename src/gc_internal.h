@@ -169,6 +169,9 @@ void gc_bitmap_set(GcBitmap* bitmap, size_t index);
 void gc_bitmap_clear(GcBitmap* bitmap, size_t index);
 int  gc_bitmap_test(const GcBitmap* bitmap, size_t index);
 
+/* descriptor helpers */
+void gc_trace_object_slots_in_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx);
+
 typedef void (*GcVisitDirtyCardFn)(GcHeader* owner, size_t card_index, void* ctx);
 
 /* card-table substrate */

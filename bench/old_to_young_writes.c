@@ -33,6 +33,42 @@ static void bench_owner_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, voi
 	}
 }
 
+static void bench_owner_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
+	BenchOwner* owner;
+	size_t      slots_begin;
+	size_t      slots_end;
+	size_t      first_index;
+	size_t      last_index;
+	size_t      i;
+
+	if (obj == NULL || visit_slot == NULL) {
+		return;
+	}
+
+	owner       = (BenchOwner*)obj;
+	slots_begin = offsetof(BenchOwner, slots);
+	slots_end   = slots_begin + sizeof(owner->slots);
+	if (byte_end <= slots_begin || byte_begin >= slots_end) {
+		return;
+	}
+	if (byte_begin < slots_begin) {
+		byte_begin = slots_begin;
+	}
+	if (byte_end > slots_end) {
+		byte_end = slots_end;
+	}
+
+	first_index = (byte_begin - slots_begin) / sizeof(owner->slots[0]);
+	last_index  = (byte_end - slots_begin + sizeof(owner->slots[0]) - 1u) / sizeof(owner->slots[0]);
+	if (last_index > BENCH_SLOT_COUNT) {
+		last_index = BENCH_SLOT_COUNT;
+	}
+
+	for (i = first_index; i < last_index; ++i) {
+		visit_slot(&owner->slots[i], ctx);
+	}
+}
+
 static double bench_now_ms(void) {
 	struct timespec ts;
 	(void)timespec_get(&ts, TIME_UTC);
@@ -60,6 +96,7 @@ static const GcDescriptor BENCH_OWNER_DESC = {
 	.flags       = GC_DESC_FLAG_CONTAINS_REFS,
 	.kind        = 201u,
 	.trace_slots = bench_owner_trace_slots,
+	.trace_slots_range = bench_owner_trace_slots_range,
 	.trace_edges = NULL,
 	.finalize    = NULL,
 };
@@ -155,8 +192,8 @@ int main(int argc, char** argv) {
 	printf("ns_per_store=%.2f\n", (elapsed_ms * 1000000.0) / (double)iterations);
 	printf("stores_per_sec=%.2f\n", ((double)iterations * 1000.0) / elapsed_ms);
 
-	gc_collect_full(rt);
 	gc_handle_release(owner_handle);
+	gc_collect_full(rt);
 	gc_thread_detach(thread);
 	gc_runtime_destroy(rt);
 	return EXIT_SUCCESS;

@@ -31,8 +31,8 @@ int gc_bitmap_resize(GcBitmap* bitmap, size_t bit_count) {
 	byte_count = (bit_count + 7u) / 8u;
 	if (byte_count == 0u) {
 		free(bitmap->bits);
-		bitmap->bits = NULL;
-		bitmap->bit_count = 0u;
+		bitmap->bits       = NULL;
+		bitmap->bit_count  = 0u;
 		bitmap->byte_count = 0u;
 		return 1;
 	}
@@ -46,8 +46,8 @@ int gc_bitmap_resize(GcBitmap* bitmap, size_t bit_count) {
 		memset(new_bits + bitmap->byte_count, 0, byte_count - bitmap->byte_count);
 	}
 
-	bitmap->bits = new_bits;
-	bitmap->bit_count = bit_count;
+	bitmap->bits       = new_bits;
+	bitmap->bit_count  = bit_count;
 	bitmap->byte_count = byte_count;
 	return 1;
 }
@@ -83,4 +83,3 @@ int gc_bitmap_test(const GcBitmap* bitmap, size_t index) {
 
 	return (bitmap->bits[index / 8u] & (uint8_t)(1u << (index % 8u))) != 0u;
 }
-

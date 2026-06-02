@@ -1,4 +1,4 @@
-#include "xgc/gc.h"
+#include "gc_internal.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -26,6 +26,25 @@ static void test_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx)
 		visit_slot((GcHeader**)&node->left, ctx);
 	}
 	if (node->right != NULL) {
+		visit_slot((GcHeader**)&node->right, ctx);
+	}
+}
+
+static void test_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
+	TestNode* node = (TestNode*)obj;
+	size_t    left_offset;
+	size_t    right_offset;
+
+	if (visit_slot == NULL) {
+		return;
+	}
+
+	left_offset  = offsetof(TestNode, left);
+	right_offset = offsetof(TestNode, right);
+	if (byte_begin <= left_offset && left_offset < byte_end && node->left != NULL) {
+		visit_slot((GcHeader**)&node->left, ctx);
+	}
+	if (byte_begin <= right_offset && right_offset < byte_end && node->right != NULL) {
 		visit_slot((GcHeader**)&node->right, ctx);
 	}
 }
@@ -62,6 +81,7 @@ static const GcDescriptor TEST_NODE_DESC = {
 	.flags       = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
 	.kind        = 2,
 	.trace_slots = test_trace_slots,
+	.trace_slots_range = test_trace_slots_range,
 	.trace_edges = test_trace_edges,
 	.finalize    = counted_finalize,
 };
@@ -125,15 +145,21 @@ int main(void) {
 	assert((uintptr_t)((TestNode*)gc_handle_get(handle)) != old_c);
 	assert(vm.roots[0]->left->left == (TestNode*)gc_handle_get(handle));
 	assert(vm.finalized_count == 0);
+	assert(rt->barriers.dirty_old_objects == 0u);
+	assert(rt->barriers.dirty_cards == 0u);
 
 	d     = make_node(rt, thread, 6);
 	old_d = (uintptr_t)d;
 	gc_store_ref(rt, thread, (GcHeader*)vm.roots[0], (GcHeader**)&vm.roots[0]->right, (GcHeader*)d);
+	assert(rt->barriers.dirty_old_objects == 1u);
+	assert(rt->barriers.dirty_cards == 1u);
 	gc_collect_minor(rt);
 	assert(vm.roots[0]->right != NULL);
 	assert((uintptr_t)vm.roots[0]->right != old_d);
 	assert(vm.roots[0]->right->id == 6);
 	assert(vm.finalized_count == 0);
+	assert(rt->barriers.dirty_old_objects == 0u);
+	assert(rt->barriers.dirty_cards == 0u);
 
 	vm.roots[0] = NULL;
 	gc_collect_full(rt);
