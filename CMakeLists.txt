@@ -34,12 +34,25 @@ add_custom_target(format
     COMMENT "Running clang-format over xgc sources"
 )
 
+# ---- GC Algorithm selection ----
+set(GC_ALGORITHM "bacon-rajan" CACHE STRING "GC algorithm implementation (bacon-rajan)")
+
 # ---- Library sources ----
-file(GLOB_RECURSE XGC_LIBRARY_SOURCES CONFIGURE_DEPENDS
+# Algorithm-specific sources (only the selected algorithm is compiled)
+file(GLOB_RECURSE XGC_ALGO_SOURCES CONFIGURE_DEPENDS
+    ${XGC_SOURCE_ROOT}/algo/${GC_ALGORITHM}/*.c
+)
+# Shared utility sources (worklist, ring buffer, reclaim, epoch, atomic, purple)
+file(GLOB XGC_SHARED_SOURCES CONFIGURE_DEPENDS
     ${XGC_SOURCE_ROOT}/*.c
 )
 file(GLOB_RECURSE XGC_LIBRARY_HEADERS CONFIGURE_DEPENDS
     ${XGC_SOURCE_ROOT}/*.h
+)
+
+set(XGC_LIBRARY_SOURCES
+    ${XGC_ALGO_SOURCES}
+    ${XGC_SHARED_SOURCES}
 )
 
 add_library(xgc STATIC ${XGC_LIBRARY_SOURCES} ${XGC_LIBRARY_HEADERS})
@@ -86,4 +99,5 @@ include(${XGC_PROJECT_ROOT}/cmake/install.cmake)
 
 message(STATUS "xgc version: ${PROJECT_VERSION}")
 message(STATUS "xgc source root: ${XGC_SOURCE_ROOT}")
-message(STATUS "GC_MULTITHREAD: ${GC_MULTITHREAD}")
+message(STATUS "GC Algorithm:    ${GC_ALGORITHM}")
+message(STATUS "GC_MULTITHREAD:  ${GC_MULTITHREAD}")
