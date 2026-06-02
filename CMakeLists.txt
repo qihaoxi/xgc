@@ -34,17 +34,23 @@ add_custom_target(format
     COMMENT "Running clang-format over xgc sources"
 )
 
-# ---- GC Algorithm selection ----
-set(GC_ALGORITHM "bacon-rajan" CACHE STRING "GC algorithm implementation (bacon-rajan)")
+# ---- GC Algorithm select options ----
+# gen_copy_ms/marksweep/bacon-rajan
+set_property(CACHE GC_ALGORITHM PROPERTY STRINGS
+    gen_copy_ms
+    marksweep
+    bacon-rajan
+)
+
 
 # ---- Library sources ----
 # Algorithm-specific sources (only the selected algorithm is compiled)
 file(GLOB_RECURSE XGC_ALGO_SOURCES CONFIGURE_DEPENDS
     ${XGC_SOURCE_ROOT}/algo/${GC_ALGORITHM}/*.c
 )
-# Shared utility sources (worklist, ring buffer, reclaim, epoch, atomic, purple)
-file(GLOB XGC_SHARED_SOURCES CONFIGURE_DEPENDS
-    ${XGC_SOURCE_ROOT}/*.c
+# Shared runtime/core substrate sources
+file(GLOB_RECURSE XGC_SHARED_SOURCES CONFIGURE_DEPENDS
+    ${XGC_SOURCE_ROOT}/core/*.c
 )
 file(GLOB_RECURSE XGC_LIBRARY_HEADERS CONFIGURE_DEPENDS
     ${XGC_SOURCE_ROOT}/*.h

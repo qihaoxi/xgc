@@ -1,0 +1,15 @@
+#include "gc_internal.h"
+
+#ifdef GC_MULTITHREAD
+
+void gc_signal_background_thread(GcRuntime* rt) {
+	/* TODO: 发信号唤醒 Background GC 线程 */
+	(void)rt;
+}
+
+void gc_wait_for_signal(GcRuntime* rt) {
+	/* TODO: Background GC 线程等待信号 */
+	(void)rt;
+}
+
+#endif /* GC_MULTITHREAD */

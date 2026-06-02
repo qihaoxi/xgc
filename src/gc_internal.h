@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdlib.h>
 
 /* ============================================================================
@@ -22,131 +23,167 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 #if defined(GC_MULTITHREAD) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
-    #include <stdatomic.h>
-    typedef _Atomic uint32_t gc_atomic_rc_t;
-    typedef _Atomic uint8_t  gc_atomic_color_t;
-    typedef _Atomic int      gc_atomic_int_t;
+#include <stdatomic.h>
+typedef _Atomic uint8_t gc_atomic_u8_t;
+typedef _Atomic int     gc_atomic_int_t;
 
-    #define GC_ATOMIC_LOAD(p)     atomic_load(p)
-    #define GC_ATOMIC_STORE(p,v)  atomic_store(p, v)
-    #define GC_ATOMIC_INC(p)      atomic_fetch_add(p, 1)
-    #define GC_ATOMIC_DEC(p)      atomic_fetch_sub(p, 1)
-    #define GC_ATOMIC_XCHG(p,v)   atomic_exchange(p, v)
-    #define GC_CAS(p,exp,des)     atomic_compare_exchange_weak(p, exp, des)
+#define GC_ATOMIC_LOAD(p) atomic_load(p)
+#define GC_ATOMIC_STORE(p, v) atomic_store(p, v)
+#define GC_ATOMIC_INC(p) atomic_fetch_add(p, 1)
+#define GC_ATOMIC_DEC(p) atomic_fetch_sub(p, 1)
+#define GC_ATOMIC_XCHG(p, v) atomic_exchange(p, v)
+#define GC_CAS(p, exp, des) atomic_compare_exchange_weak(p, exp, des)
 #else
-    typedef uint32_t gc_atomic_rc_t;
-    typedef uint8_t  gc_atomic_color_t;
-    typedef int      gc_atomic_int_t;
+typedef uint8_t gc_atomic_u8_t;
+typedef int     gc_atomic_int_t;
 
-    #define GC_ATOMIC_LOAD(p)     (*(p))
-    #define GC_ATOMIC_STORE(p,v)  (*(p) = (v))
-    #define GC_ATOMIC_INC(p)      ((*(p))++)
-    #define GC_ATOMIC_DEC(p)      ((*(p))--)
-    #define GC_ATOMIC_XCHG(p,v)   __extension__({ __typeof__(v) _xgc_old = *(p); *(p) = (v); _xgc_old; })
-    #define GC_CAS(p,exp,des)     (*(p) == *(exp) ? (*(p) = (des), 1) : (*(exp) = *(p), 0))
+#define GC_ATOMIC_LOAD(p) (*(p))
+#define GC_ATOMIC_STORE(p, v) (*(p) = (v))
+#define GC_ATOMIC_INC(p) ((*(p))++)
+#define GC_ATOMIC_DEC(p) ((*(p))--)
+#define GC_ATOMIC_XCHG(p, v)                                                                                           \
+	__extension__({                                                                                                    \
+		__typeof__(v) _xgc_old = *(p);                                                                                 \
+		*(p)                   = (v);                                                                                  \
+		_xgc_old;                                                                                                      \
+	})
+#define GC_CAS(p, exp, des) (*(p) == *(exp) ? (*(p) = (des), 1) : (*(exp) = *(p), 0))
 #endif
-
-/* ═══════════════════════════════════════════════════════════════════════════
- * 2. 侵入式通用对象头
- * ═══════════════════════════════════════════════════════════════════════════ */
-
-struct GcHeader {
-    gc_atomic_rc_t    rc;             /* 仅记录"堆引用"的计数（栈/寄存器引用不在此计数内） */
-    uint32_t          gc_ref;         /* trial deletion 工作计数（非原子，仅 GC 线程访问） */
-    gc_atomic_color_t color;          /* GC 颜色状态                               */
-    uint8_t           in_purple_buf;  /* 防止重复加入嫌疑缓冲区                       */
-    uint16_t          obj_type;       /* 弱类型标签（由 VM 层定义）                   */
-    GcHeader         *next;           /* 全局对象链表节点                            */
-};
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * 3. 显式工作栈（防 C 递归栈溢出）
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
-    GcHeader **data;
-    int        top;
-    int        capacity;
+	GcHeader** data;
+	int        top;
+	int        capacity;
 } GcWorklist;
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * 4. 全局上下文
+ * 4. 运行时与线程内部结构
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 typedef enum {
-    GC_STATE_RUNNING         = 0,  /* 正常运行                                   */
-    GC_STATE_STW_REQUESTED   = 2,  /* 有人发起了 STW 请求，等待所有线程到达 Safepoint */
-    GC_STATE_STW_IN_PROGRESS = 3,  /* STW 回收进行中（所有 Mutator 已挂起）        */
-} GcGlobalState;
+	GC_STATE_RUNNING         = 0,
+	GC_STATE_STW_REQUESTED   = 1,
+	GC_STATE_STW_IN_PROGRESS = 2,
+} GcRuntimeState;
 
-struct GcGlobalContext {
-    /* ── 全局对象链表 ── */
-    GcHeader       *global_head;
+typedef struct {
+	uintptr_t owner_base;
+	size_t    owner_size;
+	uint8_t   dirty;
+} GcCardEntry;
 
-    /* ── SPI 回调 ── */
-    GcTraceFn        on_trace_children;
-    GcFinalizeFn     on_finalize;
-    GcPressureFn     on_pressure;
-    GcPurpleFullFn   on_purple_buffer_full;
+typedef struct {
+	GcCardEntry* entries;
+	size_t       count;
+	size_t       capacity;
+	size_t       card_granularity;
+} GcCardTable;
 
-    /* ── 内存统计 ── */
-    size_t           total_allocated;
-    size_t           gc_threshold_soft;
-    size_t           gc_threshold_hard;
+typedef struct {
+	uint8_t* young_base;
+	size_t   young_capacity;
+	size_t   young_used;
+	size_t   large_object_threshold;
+	size_t   old_object_count;
+	size_t   old_object_bytes;
+} GcHeap;
 
-    /* ── 显式工作栈（共享） ── */
-    GcHeader        *worklist_data;
-    int              worklist_top;
-    int              worklist_capacity;
+typedef struct {
+	GcCardTable old_to_young;
+	size_t      dirty_old_objects;
+} GcBarrierSet;
 
-    /* ── 多线程状态（GC_MULTITHREAD 时有效） ── */
-    gc_atomic_int_t  gc_state;
-    gc_atomic_int_t  safepoint_arrive_count;
-    int              running;        /* Background GC 线程运行标志 */
+typedef struct {
+	size_t total_allocated;
+	size_t peak_allocated;
+	size_t minor_collections;
+	size_t major_collections;
+	size_t full_collections;
+} GcStats;
+
+typedef struct {
+	void* placeholder;
+} GcScheduler;
+
+struct GcRuntime {
+	GcConfig                 cfg;
+	const GcAlgorithmVTable* algo;
+	GcVmHooks                hooks;
+	GcHeap                   heap;
+	GcScheduler              sched;
+	GcBarrierSet             barriers;
+	GcStats                  stats;
+	void*                    algo_state;
+	GcHandle*                handles;
+	GcHeader**               worklist_data;
+	int                      worklist_capacity;
+	gc_atomic_int_t          gc_state;
 };
-
-/* ═══════════════════════════════════════════════════════════════════════════
- * 5. 线程本地上下文
- * ═══════════════════════════════════════════════════════════════════════════ */
 
 struct GcThreadContext {
-    /* ── 紫色缓冲区 ── */
-    GcHeader       **purple_buffer;
-    int              purple_count;
-    int              purple_capacity;
+	GcRuntime* runtime;
+	void*      vm_thread_ctx;
+	void*      algo_state;
+};
 
-    /* ── TLAB 本地分配链表 ── */
-    GcHeader        *local_head;
-    int              local_alloc_count;
-    int              tlab_threshold;
-
-    /* ── SPI 回调 ── */
-    GcScanRootsFn    on_scan_roots;
-    void            *vm_thread_ctx;
-
-    /* ── Ring Buffer 临时对象区 ── */
-    GcHeader        *zct_ring;
-    int              zct_head;
-    int              zct_capacity;
+struct GcHandle {
+	GcRuntime* runtime;
+	GcHeader*  target;
+	uint32_t   flags;
+	GcHandle*  next;
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * 6. 内部函数声明
+ * 5. 内部函数声明
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+void gc_runtime_apply_default_config(GcConfig* cfg);
+
+/* heap substrate */
+void gc_heap_init(GcHeap* heap, size_t large_object_threshold);
+void gc_heap_set_young_space(GcRuntime* rt, uint8_t* base, size_t capacity);
+void gc_heap_record_young_alloc(GcRuntime* rt, size_t bytes);
+void gc_heap_reset_young(GcRuntime* rt);
+void gc_heap_record_old_alloc(GcRuntime* rt, size_t bytes);
+void gc_heap_record_old_free(GcRuntime* rt, size_t bytes);
+
+/* barrier/card-table substrate */
+void gc_barrier_set_init(GcBarrierSet* barriers, size_t card_granularity);
+void gc_barrier_set_destroy(GcBarrierSet* barriers);
+int  gc_barrier_register_owner(GcRuntime* rt, const GcHeader* owner, size_t owner_size);
+void gc_barrier_unregister_owner(GcRuntime* rt, const GcHeader* owner);
+void gc_barrier_mark_owner_dirty(GcRuntime* rt, const GcHeader* owner);
+int  gc_barrier_is_owner_dirty(const GcRuntime* rt, const GcHeader* owner);
+void gc_barrier_clear_owner_dirty(GcRuntime* rt, const GcHeader* owner);
+
 /* gc_worklist.c */
-void      gc_worklist_push(GcWorklist *wl, GcHeader *obj);
-GcHeader *gc_worklist_pop(GcWorklist *wl);
+void      gc_worklist_push(GcWorklist* wl, GcHeader* obj);
+GcHeader* gc_worklist_pop(GcWorklist* wl);
 
 /* gc_ring.c */
-void *gc_try_ring_buffer_alloc(GcThreadContext *thread, size_t size);
-void  gc_reclaim_ring_buffer_slots(GcGlobalContext *global, GcThreadContext *thread);
+void* gc_try_ring_buffer_alloc(GcThreadContext* thread, size_t size);
+void  gc_reclaim_ring_buffer_slots(GcRuntime* rt, GcThreadContext* thread);
 
 /* gc_reclaim.c */
-void gc_reclaim_object(GcGlobalContext *global, GcHeader *obj);
+void gc_reclaim_object(GcRuntime* rt, GcHeader* obj);
+
+/* gc_purple.c */
+void gc_push_purple_adaptive(GcRuntime* rt, GcThreadContext* thread, GcHeader* obj);
 
 /* gc_epoch.c (GC_MULTITHREAD only) */
-void gc_signal_background_thread(GcGlobalContext *global);
-void gc_wait_for_signal(GcGlobalContext *global);
+void gc_signal_background_thread(GcRuntime* rt);
+void gc_wait_for_signal(GcRuntime* rt);
+
+/* bacon-rajan algorithm hooks */
+void gc_bacon_rajan_write_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHeader** slot,
+                                  GcHeader* old_value, GcHeader* new_value);
+void gc_bacon_rajan_collect_minor(GcRuntime* rt);
+void gc_bacon_rajan_collect_major(GcRuntime* rt);
+void gc_bacon_rajan_collect_full(GcRuntime* rt);
+void gc_enter_safepoint_and_park(GcRuntime* rt, GcThreadContext* thread);
 
 #endif /* XGC_GC_INTERNAL_H */

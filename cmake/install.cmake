@@ -16,6 +16,8 @@ endif ()
 
 install(FILES
     ${XGC_INCLUDE_ROOT}/xgc/gc.h
+    ${XGC_INCLUDE_ROOT}/xgc/gc_types.h
+    ${XGC_INCLUDE_ROOT}/xgc/gc_algorithm.h
     ${XGC_INCLUDE_ROOT}/xgc/gc_config.h
     DESTINATION include/xgc
 )

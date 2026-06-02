@@ -26,11 +26,11 @@
 /* ── 紫色缓冲区自适应范围 ── */
 
 #ifndef GC_PURPLE_CAPACITY_MIN
-#define GC_PURPLE_CAPACITY_MIN  64
+#define GC_PURPLE_CAPACITY_MIN 64
 #endif
 
 #ifndef GC_PURPLE_CAPACITY_MAX
-#define GC_PURPLE_CAPACITY_MAX  4096
+#define GC_PURPLE_CAPACITY_MAX 4096
 #endif
 
 #ifndef GC_PURPLE_CAPACITY_INIT
@@ -40,23 +40,23 @@
 /* ── TLAB 批量冲刷阈值 ── */
 
 #ifndef GC_TLAB_THRESHOLD
-#define GC_TLAB_THRESHOLD  128
+#define GC_TLAB_THRESHOLD 128
 #endif
 
 /* ── Ring Buffer 临时对象大小上限 ── */
 
 #ifndef GC_RING_SLOT_MAX_SIZE
-#define GC_RING_SLOT_MAX_SIZE  256
+#define GC_RING_SLOT_MAX_SIZE 256
 #endif
 
 /* ── 双水位线默认值 (字节) ── */
 
 #ifndef GC_THRESHOLD_SOFT_DEFAULT
-#define GC_THRESHOLD_SOFT_DEFAULT  (64 * 1024 * 1024)   /* 64 MB */
+#define GC_THRESHOLD_SOFT_DEFAULT (64 * 1024 * 1024) /* 64 MB */
 #endif
 
 #ifndef GC_THRESHOLD_HARD_DEFAULT
-#define GC_THRESHOLD_HARD_DEFAULT  (128 * 1024 * 1024)  /* 128 MB */
+#define GC_THRESHOLD_HARD_DEFAULT (128 * 1024 * 1024) /* 128 MB */
 #endif
 
 #endif /* XGC_GC_CONFIG_H */

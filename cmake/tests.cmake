@@ -13,4 +13,14 @@ function(add_xgc_test target_name source_file)
     add_test(NAME ${target_name} COMMAND ${target_name})
 endfunction()
 
-# Tests will be registered here as source files are created
+add_xgc_test(test_barrier_substrate ${XGC_PROJECT_ROOT}/tests/test_barrier_substrate.c)
+add_xgc_test(test_heap_substrate ${XGC_PROJECT_ROOT}/tests/test_heap_substrate.c)
+
+if (GC_ALGORITHM STREQUAL "marksweep")
+    add_xgc_test(test_marksweep_smoke ${XGC_PROJECT_ROOT}/tests/test_marksweep_smoke.c)
+endif ()
+
+if (GC_ALGORITHM STREQUAL "gen_copy_ms")
+    add_xgc_test(test_gen_copy_ms_smoke ${XGC_PROJECT_ROOT}/tests/test_gen_copy_ms_smoke.c)
+endif ()
+

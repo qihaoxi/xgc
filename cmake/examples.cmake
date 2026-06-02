@@ -14,6 +14,12 @@ function(add_xgc_example target_name source_file)
     )
 endfunction()
 
-# Examples will be registered here as source files are created
+if (GC_ALGORITHM STREQUAL "marksweep")
+    add_xgc_example(marksweep_demo ${XGC_PROJECT_ROOT}/examples/marksweep_demo.c)
+endif ()
+
+if (GC_ALGORITHM STREQUAL "gen_copy_ms")
+    add_xgc_example(gen_copy_ms_demo ${XGC_PROJECT_ROOT}/examples/gen_copy_ms_demo.c)
+endif ()
 
 message(STATUS "xgc examples enabled")
