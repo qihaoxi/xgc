@@ -42,7 +42,7 @@
     #define GC_ATOMIC_STORE(p,v)  (*(p) = (v))
     #define GC_ATOMIC_INC(p)      ((*(p))++)
     #define GC_ATOMIC_DEC(p)      ((*(p))--)
-    #define GC_ATOMIC_XCHG(p,v)   ({ typeof(v) _old = *(p); *(p) = (v); _old; })
+    #define GC_ATOMIC_XCHG(p,v)   __extension__({ __typeof__(v) _xgc_old = *(p); *(p) = (v); _xgc_old; })
     #define GC_CAS(p,exp,des)     (*(p) == *(exp) ? (*(p) = (des), 1) : (*(exp) = *(p), 0))
 #endif
 
