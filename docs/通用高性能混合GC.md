@@ -2051,87 +2051,95 @@ GC 框架对 VM 暴露的是 `GcRuntime`；算法模块在其内部挂接。
 - roots/barrier/handle 接口
 算法私有状态应藏在 runtime 内部或 plugin private state 中。
 ---
-## 13. 推荐的内置算法组合
-真正“多算法通用”不意味着第一天就实现所有算法；而是设计上允许它们自然加入。建议内置算法按如下顺序演进。
-## 13.1 算法 A：`marksweep-stw`
-### 角色
-- 基线 collector
-- 校验 descriptor / root scanning / heap iteration / finalizer 流程
-### 特性
-- 非移动
-- STW
-- 最简单 tracing collector
-### 工业价值
-所有更复杂算法最终都依赖这套 tracing substrate 是否正确。
+## 13. 推荐的内置算法组合与演进路线
+
+> 关于每种算法的**机理详解**（伪代码、数据结构、核心流程），请见第 3 章。本章聚焦于**工程路线：先做什么、后做什么、每步验证什么**。
+
+### 13.1 演进路线总览
+
+```
+marksweep-stw ──→ gen-copy-ms ──→ gen-copy-compact ──→ rc-cycle ──→ regional-concurrent
+   (Phase A)       (Phase B)         (Phase D)          (Phase E)       (Phase F)
+```
+
+每一步新增的能力都是下一步的基础。不要跳过中间步骤。
+
+### 13.2 各算法新增的能力与验证目标
+
+| 算法 | 新增的关键能力 | 验证方式 | 当前状态 |
+|------|---------------|---------|---------|
+| **marksweep-stw** | descriptor 驱动遍历、worklist tracing、finalizer 调用链、roots→对象图 的闭环 | smoke test: 线性链表、深链、自环、handle pinning | ✅ 已实现 |
+| **gen-copy-ms** | nursery bump-pointer 分配、对象 promotion/evacuation、forwarding 链表、写屏障 + card-table remembered set、dirty-card 精细扫描 | smoke test: 对象移动后地址变化验证、dirty card 计数正确性、环回收 | ✅ 已实现 |
+| **gen-copy-compact** | forwarding table/map 正规化、LISP2 或 table-based compaction、old gen relocation、slot update 在 compacting 中的正确性 | smoke test: compaction 后对象顺序、pinned 对象豁免、大对象豁免 | 🔜 规划中 |
+| **rc-cycle** | retain/release fast path、deferred RC 栈根补偿、Bacon-Rajan purple buffer + trial deletion、原子 RC（GC_MULTITHREAD 场景） | smoke test: 无环即时释放、自环/双环回收、栈根补偿后正确性 | ⚠️ 骨架占位 |
+| **regional-concurrent** | region heap、SATB/incremental-update barrier、并发 mark 线程、GC assist/pacer、读屏障（若做 concurrent relocation） | pause-time benchmark、concurrent mark 不漏标验证、大堆长时间运行 RSS | 🔜 远期规划 |
+
+### 13.3 各算法对 Substrate 的依赖矩阵
+
+| Substrate | marksweep | gen-copy-ms | gen-copy-compact | rc-cycle | regional-concurrent |
+|-----------|:---------:|:-----------:|:----------------:|:--------:|:-------------------:|
+| `worklist` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bitmap` | - | - | ✅ (mark + forwarding) | - | ✅ |
+| `card_table` | - | ✅ (old→young) | ✅ | - | ✅ (cross-region) |
+| `barrier` facade | - | ✅ | ✅ | ✅ (retain/release) | ✅ (SATB/inc-update) |
+| `heap` accounting | - | ✅ | ✅ | - | ✅ |
+| `descriptor` range scan | - | ✅ (dirty-card) | ✅ | - | ✅ |
+| `pin/handle` | ✅ (简) | ✅ (pinned→old) | ✅ (pin-aware compact) | - | ✅ |
+| `safepoint` | - | - | - | - | ✅ (并发协调) |
+| `purple buffer` | - | - | - | ✅ | - |
+
+> “-” = 该算法不需要此 substrate 或可以空实现。
+
+### 13.4 为什么不从 RC 开始
+
+一个常见的冲动是”我们的 VM 已经有 retain/release 语义，直接做 RC 不是更快吗？”
+
+不建议从 RC 开始的原因：
+
+1. **RC 对框架的要求并不低**：需要统一写屏障、需要 precise slot tracing（不然 release cascade 找不到子对象）、多线程需要原子 RC、环检测需要 trial deletion 或类似机制。
+2. **先做 tracing 能更快暴露框架问题**：descriptor 不全、roots 漏扫描、worklist 溢出——这些问题在做 marksweep 时就会立刻暴露，而不是等到 rc-cycle 才被发现。
+3. **Tracing substrate 是所有复杂算法的基础**：gen-copy-ms、compacting、concurrent mark 都依赖它。先建好 tracing substrate，再加 RC 插件成本很低。
+
+所以推荐的顺序是 **先 tracing，后 RC**——这也是 xgc 当前的实际路线。
+
 ---
-## 13.2 算法 B：`gen-copy-ms`
-### 结构
-- young gen：copying semispace
-- old gen：mark-sweep
-### 原因
-- 这是动态语言最有性价比的路线之一
-- 对纯 C VM 来说，可先只移动年轻代
-- 通过 remembered set / card table 训练屏障子系统
-### 工业参考
-- OCaml minor heap
-- 多数现代 VM 的经典分代路线
----
-## 13.3 算法 C：`gen-copy-compact`
-### 结构
-- young gen：copying
-- old gen：mark-compact / region compaction
-### 作用
-- 解决碎片问题
-- 提高长期运行场景的 locality
-### 代价
-- 需要更完整的 pin/update/forwarding 基础设施
----
-## 13.4 算法 D：`rc-cycle`
-### 结构
-- 写屏障中 retain/release
-- cycle collector 独立触发
-### 作用
-- 提供 deterministic-release 风格选项
-- 满足资源析构要求很强的运行时
-### 重要说明
-RC 应作为**可插拔算法之一**，而不是整个框架的默认形态。
----
-## 13.5 算法 E：`regional-concurrent`（远期）
-### 结构
-- region heap
-- SATB / incremental update barrier
-- 并发 mark
-- evacuation / relocation
-### 作用
-- 面向低暂停与大堆
-### 工业参考
-- G1
-- Shenandoah
-- ZGC
-- Go GC（虽不是 region evacuating，但调度与 barrier 思路可借鉴）
----
-## 14. 算法选择指南
-## 14.1 如果你优先要“最早能跑”
-选：**STW Mark-Sweep**
-理由：
-- 对对象模型要求最少
-- 最适合先验证精确 roots 与 descriptor
-- 是后续 tracing 家族的最小公共子集
-## 14.2 如果你优先要“吞吐量”
-选：**Generational copying young + non-moving old**
-理由：
-- 对临时对象极友好
-- 是多数现代 VM 的现实起点
-- 工程复杂度远低于全堆 compacting/concurrent
-## 14.3 如果你优先要“及时析构”
-选：**RC + cycle collector**
-理由：
-- 资源型对象释放更即时
-- 但应作为算法插件，而不是框架核心假设
-## 14.4 如果你优先要“低暂停”
-选：**分区式并发 collector**
-理由：
-- 但只能在准确 roots、屏障、heap metadata 完整之后再做
+## 14. 开发者决策流程
+
+> 关于每种算法的**适用场景和 trade-off 详解**，请见第 3 章。本章回答”我该选哪个算法？”。
+
+### 14.1 一句话决策
+
+```
+目标是”先把 GC 跑通”       → marksweep-stw
+目标是”高吞吐、大量临时对象” → gen-copy-ms
+目标是”消灭碎片、长期运行”   → gen-copy-compact
+目标是”资源即时释放”        → rc-cycle
+目标是”大堆低暂停”          → regional-concurrent
+```
+
+### 14.2 决策树
+
+```text
+是否需要对象地址稳定（C 代码大量持有裸指针）？
+  ├── 是 → 是否需要即时析构？
+  │         ├── 是 → rc-cycle（但对象地址仍会变化则不能移动）
+  │         └── 否 → marksweep-stw（非移动，地址稳定）
+  └── 否 → 是否有大量短命临时对象？
+            ├── 是 → gen-copy-ms
+            └── 否 → 是否需要低暂停？
+                      ├── 是 → regional-concurrent（远期）
+                      └── 否 → gen-copy-compact（长期运行防碎片）
+```
+
+### 14.3 当前项目应该选哪个
+
+截至 2026-06，xgc 的默认算法是 `gen-copy-ms`（见 `src/algo/gen_copy_ms/young_copy.c` 的 `xgc_default_algorithm()`）。选择理由：
+
+1. 它覆盖了最广泛的动态语言 VM 场景（大量短命对象）
+2. 它验证了 moving + barrier + remembered set 三条关键路径
+3. 它向上兼容（可演进到 compacting）和向下兼容（退化 marksweep 只删 nursery 部分即可）
+
+如果你的场景不同，在 `CMakeLists.txt` 中切换 `GC_ALGORITHM` 即可。
 ---
 ## 15. 工业级实现参考与可借鉴点
 | 运行时 | 算法 | 借鉴点 | 不宜直接照搬的点 |
