@@ -776,116 +776,686 @@ gen_copy_ms::collect_full(...)
 
 - `Mark-Sweep`：最适合先把框架跑通
 - `gen-copy-ms`：最适合大量短命对象场景
-- `RC`：最适合强调“资源要尽快释放”的场景
+- `RC`：最适合强调”资源要尽快释放”的场景
 - 并发/增量 GC：是后续优化方向，不是 v1 第一目标
 
 也就是说，这一章不是要求你一次吃透所有 GC 学术术语，而是帮助你回答一个更实际的问题：
 
 > **当前项目应该先实现哪种算法，为什么？**
 
-## 3.1 Reference Counting 家族
-### 代表算法
-- Naive RC
-- Deferred RC
-- RC + Trial Deletion / Bacon-Rajan
-- Generational RC
-### 优点
-- 大量无环对象可即时释放
-- 资源析构语义清晰
-- 小型运行时实现直观
-### 缺点
-- 热路径有引用计数开销
-- 天然不能处理环，需要额外 cycle collector
-- 多线程下原子 RC 成本高
-- 移动对象支持困难
-### 适用场景
-- 资源生命周期强依赖及时释放
-- 对象图相对浅、环比例不高
-- 解释器本身已有类似 retain/release 语义
-### 工业参考
-- CPython：RC + cycle collector
-- Swift / ObjC ARC：以 RC 为主，辅以 autorelease / runtime 优化
 ---
-## 3.2 Mark-Sweep
-### 代表算法
-- Stop-The-World Mark-Sweep
-- Incremental Tri-Color Mark-Sweep
-- Conservative Mark-Sweep（如 Boehm）
-### 优点
-- 实现简单、通用性强
-- 对对象头要求少
-- 天然支持环
-- 适合作为统一框架下的第一个 tracing baseline
-### 缺点
-- 非移动，容易碎片化
-- 每次回收要遍历可达对象
-- 没有分代时短命对象吞吐一般
-### 适用场景
-- 作为框架的第一个通用算法实现
-- C 运行时早期版本
-- 需要先验证 root/barrier/heap substrate 是否正确
-### 工业参考
-- Boehm-Demers-Weiser GC（偏保守式）
-- Lua 早期及其增量标记-清扫演化路线
+### 3.0 GC 算法基础概念（所有算法的共同前提）
+
+在深入每个算法之前，需要先理解贯穿所有 GC 算法的几个核心概念。
+
+#### 3.0.1 可达性与活跃性
+
+GC 的核心问题是判断**哪些对象还”活着”**。判断标准不是”对象是否被使用过”，而是**从根集出发能否到达**：
+
+```text
+根集（roots）
+  ├── 线程栈上的局部变量
+  ├── 全局变量 / 静态变量
+  ├── 寄存器中的对象引用
+  └── 外部 API 持有的句柄（handles）
+
+活跃对象 = 从任意根出发，沿引用关系可以直接或间接到达的所有对象
+垃圾对象 = 不可达的对象（即使它们之间互相引用形成环）
+```
+
+这个定义的关键后果是：**即使一个对象环内所有对象互相引用，只要没有任何根能到达环中任意节点，整个环就是垃圾。**
+
+```
+根 → A → B → C → A（A/B/C 永不回收）
+根 → D（D 存活）
+    X → Y → X（X/Y 是垃圾 — 没有任何根可达）
+```
+
+#### 3.0.2 三色抽象（Tri-Color Marking）
+
+几乎所有 tracing GC 都可以用三色抽象来理解。它把对象分成三类：
+
+| 颜色 | 含义 | 状态 |
+|------|------|------|
+| **白色** | 尚未被扫描到 | 可能是垃圾（标记完成后仍为白色 = 垃圾） |
+| **灰色** | 已被标记为存活，但其子节点尚未扫描 | 处于 worklist 中等待处理 |
+| **黑色** | 已被标记为存活，且其所有子节点已扫描 | 确认存活，不再需要处理 |
+
+算法流程：
+
+```
+1. 所有对象初始为白色
+2. 将从根直接可达的对象染为灰色，放入 worklist
+3. while worklist 非空:
+     a. 取出一个灰色对象 obj
+     b. 遍历 obj 的每个子对象 child:
+          if child 是白色:
+              将 child 染为灰色，放入 worklist
+     c. 将 obj 染为黑色
+4. 所有仍为白色的对象 = 垃圾，可回收
+```
+
+**三色不变式（Tri-Color Invariant）**：在任何时刻，黑色对象不能直接指向白色对象。所有从黑色对象到白色对象的引用路径必须经过灰色对象。如果 mutator 在 GC 标记期间修改了引用关系，写屏障的作用就是维护这个不变式。
+
+#### 3.0.3 精确 vs 保守 GC
+
+| | 精确 GC（Precise） | 保守 GC（Conservative） |
+|---|---|---|
+| 如何识别指针 | VM 提供对象布局元数据 | 扫描内存，猜测哪些值是”像指针”的整数 |
+| 根扫描 | 编译器/解释器明确告知哪些位置是指针 | 扫描整个栈和寄存器 |
+| 移动对象 | ✅ 可以（知道所有指针位置就能更新它们） | ❌ 不能（可能把整数误更新为指针） |
+| 实现复杂度 | 需要 descriptor 和精确 root map | 实现简单但语义粗糙 |
+| 本项目选择 | **精确 GC** | 不考虑 |
+
+本项目选择精确 GC 路线。这解释了为什么 `GcDescriptor`、`trace_slots`、`scan_roots` 这些基础设施是框架级别的一等公民。
+
+#### 3.0.4 STW、并发、增量
+
+| 模式 | 含义 | 暂停时间 | 实现复杂度 |
+|------|------|---------|-----------|
+| **STW（Stop-The-World）** | mutator 完全暂停，GC 独占执行 | 等于 GC 总时间 | 最简单 |
+| **增量（Incremental）** | GC 分多步执行，每步后 mutator 可运行 | 多次小暂停 | 中等 |
+| **并发（Concurrent）** | mutator 和 GC 真正同时运行 | 接近零（只有极短的 safepoint） | 最高 |
+
+本项目从 STW 开始，逐步演进。
+
+#### 3.0.5 Safepoint
+
+Safepoint 是代码中**可以安全暂停 mutator 执行**的位置。在本项目中，safepoint 采用**协作式轮询**：在分配入口和循环回跳指令处插入轻量检查。线程到达 safepoint 时，它的栈帧完整、寄存器状态清洁，GC 可以精确扫描它的根。
+
+#### 3.0.6 分代假设（Generational Hypothesis）
+
+分代 GC 的理论基础是一个经验观察：
+
+> **大多数对象在创建后很快就变成垃圾（”婴儿死亡率高”），而存活较久的对象倾向于继续存活。**
+
+具体数据：
+- 约 80-98% 的新对象在一次 GC 内就死亡
+- 存活超过一次 GC 的对象，大概率长期存活
+
+分代 GC 利用这个假设：
+- **年轻代（young generation）**：频繁收集，因为大部分对象死在这里
+- **老年代（old generation）**：低频收集，因为老对象大概率还活着
+- 对象从年轻代”晋升”（promote）到老年代的条件：存活了若干轮 GC
+
+#### 3.0.7 记忆集（Remembered Set）与卡表（Card Table）
+
+分代 GC 面临一个问题：minor GC 只扫年轻代，但老年代对象可能包含指向年轻代的引用。如果每次 minor GC 都扫描整个老年代，分代的优势就没了。
+
+**Remembered Set** 记录”老年代中哪些位置可能指向年轻代”。**Card Table** 是实现 remembered set 的一种常见方式：
+
+```
+老年代空间被切成固定大小的”卡片”（card，通常是 128-512 字节）
+当一个 slot 被写入，且写入是 old→young 引用时：
+    card_table[slot_addr / card_size] = DIRTY
+
+minor GC 时：
+    只扫描 dirty cards 对应的老年代区域
+    而不是扫描整个老年代
+```
+
+这大幅缩小了 minor GC 的扫描范围。xgc 的 `src/core/card_table.c` 实现了这个机制。
+
+#### 3.0.8 写屏障（Write Barrier）的分类
+
+写屏障是 GC 的核心机制。按目的分，主要有三种：
+
+| 类型 | 目的 | 何时触发 | 使用方 |
+|------|------|---------|--------|
+| **Remembered-set barrier** | 记录 old→young 引用 | `gc_store_ref(owner(old), slot, new_value(young))` | 分代 GC |
+| **SATB barrier** | 记录被覆盖的旧值 | 写入前保存旧值快照 | G1, 并发标记 |
+| **Incremental-update barrier** | 把新引入的引用重新标灰 | 写入后标记新值 | 增量标记 |
+| **RC barrier** | retain/release | 每次赋值 | 引用计数 |
+
+xgc 选择统一入口 `gc_store_ref(...)`，由当前算法内部决定 barrier 行为。
+
+#### 3.0.9 移动对象（Moving GC）的前提条件
+
+要让 GC 能安全移动对象，必须满足以下全部前提：
+
+1. **精确根**：所有指向被移动对象的根引用都必须是 GC 已知的 slot，以便更新地址
+2. **精确对象布局**：对象的每个引用字段的位置和类型都是已知的
+3. **转发机制**：旧地址到新地址的映射，用于在移动过程中处理”已被移走但旧地址仍被引用”的时刻
+4. **Pinning/Handle**：外部 C 代码持有的裸指针需要固定对象或通过句柄间接访问
+
+xgc 在 `gen-copy-ms` 算法中实践了这些机制：nursery space 支持 bump-pointer 分配和 promotion 复制，`GcHandle` 为外部引用提供了间接层。
+
 ---
-## 3.3 Generational Tracing
-### 代表算法
-- Young copying + old mark-sweep
-- Young copying + old mark-compact
-- Two-generation / multi-generation collectors
-### 优点
-- 极适合大量短命对象场景
-- 吞吐量高
-- 可分阶段演进：先年轻代移动，老年代不移动
-### 缺点
-- 需要 remembered set / write barrier
-- 需要更复杂的堆布局
-- 调试复杂度高于单一 Mark-Sweep
-### 适用场景
-- 脚本语言 / 动态语言解释器
-- 编译器中间表示、AST、临时对象很多
-- 服务端高分配速率场景
-### 工业参考
-- HotSpot JVM：Serial/Parallel/G1 均体现分代思想
-- .NET GC：分代收集
-- V8 Orinoco：分代、增量、并发组合
-- OCaml minor heap：复制式年轻代
+## 3.1 Mark-Sweep：最经典的 Tracing GC
+
+### 3.1.1 算法机理
+
+Mark-Sweep 是 GC 算法的”最小公分母”。几乎每一个 GC 框架的第一个基准实现都应该是它。
+
+**核心思想**：两阶段。Mark 阶段从根出发遍历对象图，标记所有存活对象。Sweep 阶段遍历整个堆，回收未标记的对象。
+
+```
+算法：STW Mark-Sweep
+
+Phase 1 — Mark（标记）：
+    将所有对象标记为”未访问”
+    worklist = []
+    for each root_slot in roots:
+        obj = *root_slot
+        if obj 未标记:
+            标记 obj
+            worklist.push(obj)
+
+    while worklist 非空:
+        obj = worklist.pop()
+        for each child_slot in obj（通过 descriptor->trace_slots）:
+            child = *child_slot
+            if child 未标记:
+                标记 child
+                worklist.push(child)
+
+Phase 2 — Sweep（清除）：
+    for each object in 全堆对象列表:
+        if object 已标记:
+            清除标记（为下一轮 GC 做准备）
+        else:
+            调用 descriptor->finalize(object)
+            free(object)
+```
+
+### 3.1.2 关键数据结构
+
+```c
+// Mark-Sweep 的算法私有状态（见 xgc src/algo/marksweep/ms.c）
+typedef struct GcMsNode {
+    GcHeader*        obj;     // 指向堆对象
+    uint8_t          marked;  // 本轮是否标记
+    struct GcMsNode* next;    // 全对象链表
+} GcMsNode;
+
+typedef struct {
+    GcMsNode* objects;        // 全对象链表头
+} GcMarksweepState;
+```
+
+### 3.1.3 实现要点
+
+1. **全对象链表**：最简单的实现是维护一个全局链表，记录所有已分配对象。`alloc` 时插入链表，`sweep` 时遍历链表。
+
+2. **Mark 位可以放在对象头或 side metadata 中**。xgc 的 `marksweep-stw` 把 `marked` 放在 `GcMsNode` 中（算法私有状态），而非 `GcHeader` 中（公共最小头）。
+
+3. **显式 worklist 而非递归**：对象图可能很深。用 `GcWorklist`（`src/core/worklist.c`）迭代替代 C 函数递归，防止栈溢出。
+
+4. **Descriptors 驱动的子引用遍历**：Mark 阶段不硬编码对象类型（”如果是 dict 就这样扫，如果是 list 就那样扫”），而是通过 `desc->trace_slots(obj, visit_slot, ctx)` 统一遍历。这使 GC 核心代码与对象类型解耦。
+
+5. **Sweep 阶段不要忘记处理 finalizer**：在释放对象之前调用 `desc->finalize(obj)`，让 VM 有机会释放对象持有的非 GC 资源（如文件描述符、网络连接）。
+
+### 3.1.4 在 xgc 中的对应实现
+
+- **代码位置**：`src/algo/marksweep/ms.c`（约 309 行）
+- **vtable 注册**：`xgc_algorithm_marksweep_stw()`
+- **Capability 声明**：`supports_moving=0, supports_generations=0, requires_write_barrier=0`
+- **测试**：`tests/test_marksweep_smoke.c` — 包含链表可达性、handle pinning、自环回收等场景
+
+### 3.1.5 优缺点总结
+
+| 优点 | 缺点 |
+|------|------|
+| 实现最简单，适合验证框架正确性 | 非移动，长期运行会碎片化 |
+| 对象头最小（只需一个 mark bit） | 每次 GC 要遍历”所有存活对象”而不只是”可能变化的部分” |
+| 天然处理环 | 没有分代时短命对象吞吐量低 |
+| 不要求精确根也能工作（保守式变体） | sweep 阶段要遍历整个堆，含大量死亡对象 |
+
+### 3.1.6 工业参考
+
+- **Boehm-Demers-Weiser GC**：C/C++ 的保守式 Mark-Sweep，不要求精确根信息
+- **Lua 5.0-5.3**：以增量 Mark-Sweep 为核心，逐步演化
+- **CPython 的循环检测**：虽然不是全局 Mark-Sweep，但其 cycle collector 使用了类似的”标记 + 扫描”逻辑
+
 ---
-## 3.4 Copying / Compacting
-### Copying 的意义
-- 分配只需 bump pointer
-- 年轻代回收效率极高
-- 能自然消除碎片
-### Compacting 的意义
-- 老年代长期运行后可压缩碎片
-- 提高对象局部性与缓存命中率
-### 成本
-- 需要更新所有指针槽位
-- 需要精确根和精确对象布局
-- 需要 pinning / handle / forwarding 机制之一
-### 工业参考
-- Cheney semispace copying
-- HotSpot Serial/Parallel compaction
-- V8 compaction phases
-- .NET compacting generations
+## 3.2 Copying GC（半空间复制）
+
+### 3.2.1 算法机理
+
+Copying GC 是”移动对象”最简单的实现。它将堆分成两个等大的半空间：**from-space** 和 **to-space**。分配总是在 from-space 中通过 bump pointer 进行。GC 时：
+
+```
+算法：Semi-Space Copying GC（Cheney 算法）
+
+// 初始
+from-space: [A B C D E F _ _ _ _ _ _ _ _ _ _]
+            ^bump pointer
+
+to-space:   [_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _]
+
+// GC 开始 — 交换 from/to，清空 to-space
+swap(from, to)
+to-space 初始为空
+
+// 从根开始复制
+scan = to-space 起始
+free = to-space 起始
+for each root_slot:
+    *root_slot = copy_to_to_space(*root_slot)  // 把根指向的对象复制到 to-space
+
+// 扫描 to-space 中的对象，更新子引用
+while scan < free:
+    obj = (GcHeader*)scan
+    for each child_slot in obj:
+        *child_slot = copy_to_to_space(*child_slot)
+    scan += obj->size
+
+// copy_to_to_space 的语义:
+GcHeader* copy_to_to_space(GcHeader* obj):
+    if obj 已在 to-space 中（看 forwarding 标记）:
+        return obj 在 to-space 中的新地址
+    // 否则复制:
+    new_obj = (GcHeader*)free
+    memcpy(new_obj, obj, obj->size)
+    在 obj 的旧地址记录 forwarding 信息：obj → new_obj
+    free += obj->size
+    return new_obj
+```
+
+### 3.2.2 关键数据结构
+
+```c
+// Forwarding：对象移动后，旧地址指向新地址
+// 最简单的实现：在旧对象的字段中临时存放新地址
+
+// 判断对象是否已被复制：
+//   如果旧对象头部被改写为 forwarding 地址，则已复制
+//   否则，旧对象还在 from-space
+
+// Bump-pointer 分配：
+//   free 指针始终指向 to-space 中的下一个空闲位置
+//   分配时 free += size，O(1) 时间
+```
+
+### 3.2.3 Cheney 算法的优雅之处
+
+Cheney 扫描算法把 worklist 和 to-space 合并为一个结构：
+
+- `free` 指针：下一个对象复制到 to-space 的位置
+- `scan` 指针：下一个需要扫描子引用的对象位置
+- 当 `scan == free` 时，所有存活对象的子引用都已处理完毕
+
+这不需要额外的 worklist 数据结构——to-space 本身就是 worklist。
+
+### 3.2.4 优缺点
+
+| 优点 | 缺点 |
+|------|------|
+| 分配 = bump pointer，极其快 | 浪费一半堆内存（to-space 在非 GC 期间空闲） |
+| GC 后 from-space 完全清空，零碎片 | 大对象复制成本高 |
+| Cheney 算法不需要显式 worklist | 必须精确知道所有指针位置 |
+| 自然处理碎片（连续分配） | 对象地址变化，需要跟踪所有引用 |
+
+### 3.2.5 在 xgc 中的对应
+
+xgc 的 `gen-copy-ms` 算法在年轻代使用了 copying 技术：
+
+- Nursery space 使用 bump-pointer 分配
+- Minor GC 时，存活对象被复制到老年代空间（promotion）
+- 使用 `GcGenForward` 链表记录 forwarding 信息：`{from, to, next}`
+- 根和 handle 更新通过 `gc_gen_evacuate_slot` 回调完成
+
+### 3.2.6 工业参考
+
+- **OCaml minor heap**：经典的年轻代 copying GC
+- **HotSpot Serial/Parallel GC**：年轻代使用 copying
+- **Cheney 1970 论文**：半空间复制算法的原始论文
+
 ---
-## 3.5 并发 / 增量 / 分区式 GC
-### 目标
-- 降低 STW 暂停时间
-- 将标记或重定位工作与 mutator 交错执行
-### 常见技术
-- Incremental tri-color
-- Snapshot-at-the-beginning (SATB)
-- Incremental update barrier
-- Region-based evacuation
-- Load barrier / colored pointer
-### 工业参考
-- JVM G1：分区 + remembered set + SATB
-- Shenandoah：并发疏散、读屏障
-- ZGC：染色指针、并发 relocation
-- Go GC：并发 tri-color + assist + pacer
-### 结论
-这类算法不应成为框架 v1 的前提，但框架必须**为它们预留结构性扩展点**。
+## 3.3 Mark-Compact：压缩式 GC
+
+### 3.3.1 为什么需要 Compaction
+
+Copying GC 完美处理了碎片，但浪费了一半内存。Mark-Compact 在 Mark-Sweep 的基础上增加一步：**标记存活对象后，把它们向堆的一端滑动（slide/compact），释放连续的大块空间**。
+
+### 3.3.2 三种常见 Compaction 策略
+
+**（1）Two-Finger Compaction**
+
+- 一个指针从堆低端向上扫，找空闲区域
+- 一个指针从堆高端向下扫，找存活对象
+- 将高端存活对象移动到低端空闲区域
+- 需要为每个对象记录 forwarding 地址
+- 优点：简单；缺点：对象顺序被打乱，可能破坏局部性
+
+**（2）LISP2 Compaction**
+
+```
+Phase 1 — Mark：标记所有存活对象
+Phase 2 — Compute Forwarding：
+    从头到尾扫描堆，计算每个存活对象压缩后的地址
+    forwarding[obj] = 新地址
+Phase 3 — Update References：
+    遍历所有存活对象，根据 forwarding 表更新其内部所有引用
+    遍历所有根，更新根引用
+Phase 4 — Move Objects：
+    将每个存活对象 memmove 到新地址
+```
+
+- 需要额外的 forwarding 表（可以是 side metadata）
+- 对象保持原有顺序
+
+**（3）Table-Based Compaction（如 HotSpot 使用）**
+
+- 将堆分成固定大小的块
+- 维护每块的”存活对象偏移表”
+- 通过偏移表并行更新引用和移动对象
+- 适合多线程并行 GC
+
+### 3.3.3 在 xgc 中的位置
+
+xgc 目前没有独立的 compacting collector，但以下基础设施已经为它准备好了：
+
+- `GcBitmap`（`src/core/bitmap.c`）：可以存储 mark bits 和 forwarding bits
+- `GcHandle` 和 `pin/unpin` API：用于处理不能移动的对象
+- `trace_slots`：精确枚举对象中的所有引用 slot，这是 updating references 的前提
+
+在 xgc 的演进路线中，`gen-copy-compact` 是 Phase D，在 `gen-copy-ms` 之后。
+
+---
+## 3.4 Generational GC（分代垃圾回收）
+
+### 3.4.1 为什么分代有效
+
+回顾分代假设（§3.0.6）：大多数对象很快死亡，长活对象倾向继续长活。
+
+如果一个 GC 每次都对整个堆做 Mark-Sweep，它反复遍历大量”老而不死”的对象，而这些对象在这次 GC 中几乎不可能变成垃圾。**分代 GC 的关键洞察**是：把精力集中在”更可能产生垃圾”的区域。
+
+### 3.4.2 分代 GC 的结构
+
+```
+┌──────────────────────────────────────────┐
+│ 年轻代（Young / Nursery）                  │
+│ - bump-pointer 分配（Copying semispace）   │
+│ - 频繁的 minor GC                         │
+│ - 晋升阈值：存活 N 轮 → 进老年代           │
+│ - 大小：通常几 MB                          │
+├──────────────────────────────────────────┤
+│ 老年代（Old / Tenured）                    │
+│ - 标记-清扫 或 标记-压缩                   │
+│ - 低频的 major/full GC                     │
+│ - 大小：剩余堆空间                         │
+└──────────────────────────────────────────┘
+```
+
+### 3.4.3 Minor GC 完整流程
+
+以 xgc 的 `gen-copy-ms` 为例：
+
+```
+minor_collect():
+    1. 停止 mutator（STW）
+
+    2. 扫描根（roots）：
+       for each root_slot:
+           if *root_slot 在 nursery 中:
+               *root_slot = promote_to_old(*root_slot)
+       # promote_to_old：复制对象到 old gen，建立 forwarding
+
+    3. 扫描 handles：
+       for each handle:
+           if handle->target 在 nursery 中:
+               handle->target = promote_to_old(handle->target)
+
+    4. 扫描 dirty cards（remembered set）：
+       for each dirty_card in card_table:
+           # 只扫描这张 card 覆盖的老年代对象的 slot 范围
+           for each slot in 该 card 覆盖范围:
+               if *slot 在 nursery 中:
+                   *slot = promote_to_old(*slot)
+
+    5. drain worklist：
+       # promoted 对象可能本身就包含指向其他 nursery 对象的引用
+       while worklist 非空:
+           obj = worklist.pop()
+           for each child_slot in obj:
+               if *child_slot 在 nursery 中:
+                   *child_slot = promote_to_old(*child_slot)
+
+    6. 清理：
+       for each 原 nursery 中的对象:
+           if 未被 promote（dead）且有 finalizer:
+               finalize(obj)
+       清空 nursery space
+       清除所有 dirty cards
+```
+
+### 3.4.4 写屏障在分代 GC 中的角色
+
+如果在 minor GC 之间，mutator 执行了 `old_object->some_field = young_object`，写屏障必须**记录这个写入**，否则下次 minor GC 时这个 young_object 可能被当作垃圾回收（因为没有根或 handle 指向它，只有老年代中的引用）。
+
+```
+// gc_store_ref 内部：
+*slot = new_value;                           // 真实写入
+
+// 写屏障：
+if (owner 在老年代 && new_value 在年轻代):
+    card_table_mark_dirty(owner, slot);      // 记录这个 old→young 引用
+```
+
+### 3.4.5 晋升策略（Promotion Policy）
+
+对象何时从年轻代晋升到老年代？常见策略：
+
+| 策略 | 描述 |
+|------|------|
+| **Age-based** | 对象每存活一次 minor GC，age++；`age >= threshold` 时晋升 |
+| **Size-based** | 大对象直接分配进老年代（避免复制成本） |
+| **Survival-based** | 本次 GC 存活率过高时，提升阈值避免频繁 GC |
+| **Pinned** | 被 pin 的对象不移动，直接分入老年代 |
+
+xgc 的 `gen-copy-ms` 当前使用简化策略：**pinned 或超过 nursery 一半大小的对象直接进老年代**；其余在 nursery 中分配，minor GC 时全部 evacuate 到老年代。
+
+### 3.4.6 在 xgc 中的完整实现路径
+
+```
+分配：gc_alloc_typed → runtime.c → gen_copy_ms::alloc
+  ├── 小对象 + 非pinned → nursery bump-pointer
+  └── 大对象 / pinned → calloc + gc_gen_add_old_node + gc_barrier_register_owner
+
+写引用：gc_store_ref → runtime.c → gen_copy_ms::write_barrier
+  └── 如果是 old→young → gc_barrier_mark_slot_dirty
+                                → barrier.c → card_table.c → bitmap.c
+
+minor GC：gc_collect_minor → runtime.c → gen_copy_ms::collect_minor
+  ├── gc_gen_minor_scan_handles
+  ├── hooks.scan_roots → gc_gen_evacuate_slot → gc_gen_promote
+  ├── gc_barrier_visit_dirty_cards → gc_gen_minor_visit_dirty_card
+  │       └── gc_trace_object_slots_in_range → 只扫描 card 覆盖的 slot 范围
+  ├── gc_gen_minor_drain（worklist 遍历）
+  └── gc_gen_finalize_dead_nursery + gc_heap_reset_young
+```
+
+### 3.4.7 工业参考
+
+- **OCaml**：nursery copying + old mark-sweep（最接近 xgc 当前实现）
+- **HotSpot Serial GC**：young copying（semispace）+ old mark-compact
+- **V8 Orinoco**：young semispace + old mark-compact + 增量标记
+
+---
+## 3.5 Reference Counting（引用计数）家族
+
+### 3.5.1 核心原理
+
+与 Mark-Sweep 从根出发”找活对象”不同，RC 的视角是：
+
+> **每个对象记录”有多少个其他对象引用了我”。当这个数字降为零时，对象就是垃圾。**
+
+```c
+// 最简单的 RC 实现
+typedef struct {
+    uint32_t rc;         // 引用计数
+    // ... 其他字段
+} RcObject;
+
+// retain：有人开始引用我了
+void retain(RcObject *obj) {
+    if (obj) obj->rc++;
+}
+
+// release：有人不再引用我了
+void release(RcObject *obj) {
+    if (obj && --obj->rc == 0) {
+        // 我变成垃圾了 — 先释放我的子对象
+        for each child in obj:
+            release(child);
+        // 最后释放自己
+        free(obj);
+    }
+}
+```
+
+### 3.5.2 RC 的核心问题：无法回收环
+
+```
+A <──> B    （A.rc=1, B.rc=1，互相引用）
+  ↕
+  根（无根可达）
+
+A 和 B 的 rc 永远不小于 1，永远不会被 release 回收。
+即使没有任何根指向它们，它们仍然互相”活着”。
+```
+
+这就是为什么纯 RC 需要**额外的环检测器（Cycle Collector）**。
+
+### 3.5.3 两种主要的 RC 变体
+
+**（1）Immediate RC**
+
+- 每次赋值立即执行 retain/release
+- 即时释放，延迟低
+- 每次赋值都有开销
+
+**（2）Deferred RC**
+
+- 赋值时只记录增减，不立即检查归零
+- 定期批量处理
+- 减少热路径原子操作
+- Swift/ObjC ARC 在编译器优化层面使用了类似思想
+
+### 3.5.4 Bacon-Rajan Cycle Collection
+
+Bacon 和 Rajan 在 2001 年提出了一种高效的 RC 环检测算法，核心思想是：
+
+```
+核心洞察：
+  环内的引用都是”内部引用”（internal edges）。
+  如果从环内对象的 RC 中减去所有内部引用，
+  剩下的就是”外部引用”（external references）。
+  如果外部引用 = 0，整个环就是垃圾。
+
+算法阶段（Trial Deletion）：
+Phase 1 — 标记嫌疑集：
+    每当一个对象的 RC 减少但未归零，将其加入紫色缓冲区（purple buffer）
+    紫色 = “可能是环的一部分”
+
+Phase 2 — 减去内部引用：
+    以紫色对象为起点，遍历整张子图
+    对子图内每条边：目标对象的 gc_ref--
+
+Phase 3 — 判定：
+    遍历嫌疑集：
+        gc_ref > 0 → 有外部引用 → 存活（染黑）
+        gc_ref == 0 → 纯内部引用 → 垃圾（染白）
+
+Phase 4 — 释放：
+    回收白色对象
+    黑色对象重回正常状态
+```
+
+### 3.5.5 在 xgc 中的位置
+
+xgc 的 `bacon-rajan` 算法目录目前是骨架实现，预留了 `write_barrier`（RC retain/release 的入口）和 `collect_full`（cycle collector 的触发点）。`src/core/purple.c` 中的 `gc_push_purple_adaptive` 是为 RC cycle collector 预备的嫌疑对象缓冲区。
+
+### 3.5.6 工业参考
+
+- **CPython**：全量 RC（包括栈）+ 分代 cycle collector（Trial Deletion 变体）
+- **Swift/ObjC ARC**：编译器辅助的 Deferred RC + autorelease pool
+- **PHP 7+**：RC 为主，辅以少量 tracing
+- **Mozilla'sServo**：RC 作为主要内存管理策略
+
+---
+## 3.6 并发与增量 GC 基础
+
+### 3.6.1 为什么需要并发/增量
+
+经典 STW GC 有一个根本问题：堆越大，暂停越长。对于 GUI 应用、游戏、实时系统，>10ms 的暂停是不可接受的。
+
+增量 GC 把一次完整的 GC 拆成多个小步骤，每步交替执行 mutator 代码。并发 GC 更进一步：mark 线程和 mutator 线程真正同时运行。
+
+### 3.6.2 并发标记的挑战：Mutator 在修改对象图
+
+假设 GC 线程正在标记对象 A（灰色），并扫描 A 的子节点：
+
+```
+时刻 1：GC 扫描 A.child，看到 B 是白色
+时刻 2：Mutator 把 B 赋值到 根变量 root 中
+时刻 3：Mutator 把 A.child 设为 NULL
+时刻 4：GC 继续扫描，认为已经”处理过 A→B 这条边了”
+时刻 5：标记结束，B 仍是白色 → 被当作垃圾释放！
+```
+
+这就是**并发修改导致活对象被漏标**的问题。解决方案是**写屏障**。
+
+### 3.6.3 两种写屏障策略
+
+**（1）SATB（Snapshot-At-The-Beginning）**
+
+在标记开始时对对象图拍一个逻辑快照。如果 mutator 覆盖了一个引用，barrier 会把旧值记录下来：
+
+```
+write_barrier_satb(owner, slot, old_value, new_value):
+    if GC 正在标记 && old_value 是白色:
+        old_value 染灰色，放入标记队列   // “这个对象在快照时刻是存活的”
+    *slot = new_value
+```
+
+- 用方：G1 GC
+- 特点：保守（某些实际已死的对象也会被标活，但不会漏标）
+
+**（2）Incremental Update**
+
+如果 mutator 在黑色对象中添加了一个白色引用，barrier 把黑色对象重新染灰：
+
+```
+write_barrier_incremental(owner, slot, old_value, new_value):
+    *slot = new_value
+    if GC 正在标记 && owner 是黑色 && new_value 是白色:
+        owner 重新染灰                    // “这个黑色对象现在指向了我们还没扫描到的东西”
+```
+
+- 用方：CMS（Concurrent Mark Sweep）
+- 特点：需要重新扫描灰色对象的子节点
+
+### 3.6.4 并发/增量 GC 在 xgc 中的预留
+
+xgc 已经为并发/增量 GC 预留了以下基础设施：
+
+| 能力 | 位置 | 作用 |
+|------|------|------|
+| `GcAlgorithmCaps.supports_concurrent_mark` | `gc_algorithm.h` | 声明算法支持并发标记 |
+| `read_barrier` vtable 函数 | `gc_algorithm.h` | 并发 relocation 需要读屏障 |
+| `GcScheduler` | `gc_internal.h` | 并发调度预留 |
+| `gc_signal_background_thread` | `core/epoch.c` | 唤醒后台 GC 线程 |
+| Card table + bitmap | `core/card_table.c` + `core/bitmap.c` | SATB 和 incremental update 都需要的元数据 |
+
+### 3.6.5 工业参考
+
+- **Go GC**：并发 tri-color + write barrier（incremental update 风格）+ GC assist + pacer
+- **JVM G1**：SATB + remembered set + concurrent mark + STW evacuation
+- **JVM ZGC**：染色指针 + concurrent relocation + load barrier
+- **JVM Shenandoah**：concurrent evacuation + Brooks-style forwarding pointer
+
+---
+## 3.7 算法选择速查表
+
+| 需求 | 推荐算法 | 当前 xgc 状态 |
+|------|---------|--------------|
+| “我要最快跑起来” | marksweep-stw | ✅ 已实现 |
+| “大量临时对象，要高吞吐” | gen-copy-ms | ✅ 已实现 |
+| “资源要即时释放” | rc-cycle | ⚠️ 骨架占位 |
+| “长期运行要压缩碎片” | gen-copy-compact | 🔜 规划中 |
+| “大堆要低暂停” | regional-concurrent | 🔜 远期规划 |
 ---
 ## 4. 框架的总架构
 一个真正多算法通用的设计，应拆成五层：
