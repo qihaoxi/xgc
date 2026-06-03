@@ -82,14 +82,14 @@ static test_node* make_node(gc_runtime* rt, gc_thread_context* thread, test_vm* 
 }
 
 int main(void) {
-	gc_config          cfg;
-	gc_vm_hooks        hooks;
-	test_vm            vm = { 0 };
-	test_node*         a;
-	test_node*         b;
-	test_node*         c;
-	test_node*         x;
-	test_node*         y;
+	gc_config   cfg;
+	gc_vm_hooks hooks;
+	test_vm     vm = { 0 };
+	test_node*  a;
+	test_node*  b;
+	test_node*  c;
+	test_node*  x;
+	test_node*  y;
 
 	gc_config_init_default(&cfg);
 	g_test_vm        = &vm;

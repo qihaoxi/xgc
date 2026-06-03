@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 typedef struct DemoNode {
-	GcHeader         gc;
+	gc_header        gc;
 	struct DemoNode* next;
 	const char*      name;
 } DemoNode;
@@ -14,14 +14,14 @@ typedef struct {
 	DemoNode* root;
 } DemoVm;
 
-static void demo_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx) {
+static void demo_trace_slots(gc_header* obj, gc_visit_slot_fn visit_slot, void* ctx) {
 	DemoNode* node = (DemoNode*)obj;
 	if (node->next != NULL) {
-		visit_slot((GcHeader**)&node->next, ctx);
+		visit_slot((gc_header**)&node->next, ctx);
 	}
 }
 
-static void demo_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot,
+static void demo_trace_slots_range(gc_header* obj, size_t byte_begin, size_t byte_end, gc_visit_slot_fn visit_slot,
                                    void* ctx) {
 	DemoNode* node = (DemoNode*)obj;
 	size_t    next_offset;
@@ -32,28 +32,28 @@ static void demo_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte
 
 	next_offset = offsetof(DemoNode, next);
 	if (byte_begin <= next_offset && next_offset < byte_end && node->next != NULL) {
-		visit_slot((GcHeader**)&node->next, ctx);
+		visit_slot((gc_header**)&node->next, ctx);
 	}
 }
 
-static void demo_trace_edges(GcHeader* obj, GcVisitObjectFn visit_obj, void* ctx) {
+static void demo_trace_edges(gc_header* obj, GcVisitObjectFn visit_obj, void* ctx) {
 	DemoNode* node = (DemoNode*)obj;
 	if (node->next != NULL) {
-		visit_obj((GcHeader*)node->next, ctx);
+		visit_obj((gc_header*)node->next, ctx);
 	}
 }
 
-static void demo_finalize(GcHeader* obj) {
+static void demo_finalize(gc_header* obj) {
 	DemoNode* node = (DemoNode*)obj;
 	printf("finalize: %s\n", node->name);
 }
 
-static void demo_scan_roots(void* vm_ctx, GcVisitSlotFn visit_root_slot, void* ctx) {
+static void demo_scan_roots(void* vm_ctx, gc_visit_slot_fn visit_root_slot, void* ctx) {
 	DemoVm* vm = (DemoVm*)vm_ctx;
-	visit_root_slot((GcHeader**)&vm->root, ctx);
+	visit_root_slot((gc_header**)&vm->root, ctx);
 }
 
-static const GcDescriptor DEMO_NODE_DESC = {
+static const gc_descriptor DEMO_NODE_DESC = {
 	.name              = "GenCopyDemoNode",
 	.fixed_size        = sizeof(DemoNode),
 	.flags             = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
@@ -64,7 +64,7 @@ static const GcDescriptor DEMO_NODE_DESC = {
 	.finalize          = demo_finalize,
 };
 
-static DemoNode* demo_new_node(GcRuntime* rt, GcThreadContext* thread, const char* name) {
+static DemoNode* demo_new_node(gc_runtime* rt, gc_thread_context* thread, const char* name) {
 	DemoNode* node = (DemoNode*)gc_alloc_typed(rt, thread, &DEMO_NODE_DESC, sizeof(DemoNode), GC_ALLOC_DEFAULT);
 	if (node == NULL) {
 		return NULL;
@@ -75,16 +75,16 @@ static DemoNode* demo_new_node(GcRuntime* rt, GcThreadContext* thread, const cha
 }
 
 int main(void) {
-	GcConfig         cfg;
-	GcVmHooks        hooks;
-	GcRuntime*       rt;
-	GcThreadContext* thread;
-	DemoVm           vm = { 0 };
-	DemoNode*        a;
-	DemoNode*        b;
-	DemoNode*        c;
-	DemoNode*        d;
-	uintptr_t        old_root;
+	gc_config          cfg;
+	gc_vm_hooks        hooks;
+	gc_runtime*        rt;
+	gc_thread_context* thread;
+	DemoVm             vm = { 0 };
+	DemoNode*          a;
+	DemoNode*          b;
+	DemoNode*          c;
+	DemoNode*          d;
+	uintptr_t          old_root;
 
 	gc_config_init_default(&cfg);
 	cfg.gc_young_space_size = 256;
@@ -106,8 +106,8 @@ int main(void) {
 		return EXIT_FAILURE;
 	}
 
-	gc_store_ref(rt, thread, (GcHeader*)a, (GcHeader**)&a->next, (GcHeader*)b);
-	gc_store_ref(rt, thread, (GcHeader*)b, (GcHeader**)&b->next, (GcHeader*)c);
+	gc_store_ref(rt, thread, (gc_header*)a, (gc_header**)&a->next, (gc_header*)b);
+	gc_store_ref(rt, thread, (gc_header*)b, (gc_header**)&b->next, (gc_header*)c);
 	vm.root  = a;
 	old_root = (uintptr_t)vm.root;
 
@@ -120,7 +120,7 @@ int main(void) {
 		fprintf(stderr, "allocation failed\n");
 		return EXIT_FAILURE;
 	}
-	gc_store_ref(rt, thread, (GcHeader*)vm.root, (GcHeader**)&vm.root->next, (GcHeader*)d);
+	gc_store_ref(rt, thread, (gc_header*)vm.root, (gc_header**)&vm.root->next, (gc_header*)d);
 	puts("minor collection after old->young write barrier:");
 	gc_collect_minor(rt);
 	printf("root now points to: %s\n", vm.root->next != NULL ? vm.root->next->name : "<null>");
