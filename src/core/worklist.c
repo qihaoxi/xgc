@@ -1,8 +1,8 @@
 #include "gc_internal.h"
 
-void gc_worklist_push(GcWorklist* wl, GcHeader* obj) {
-	GcHeader** new_data;
-	int        new_capacity;
+void gc_worklist_push(gc_worklist* wl, gc_header* obj) {
+	gc_header** new_data;
+	int         new_capacity;
 
 	if (wl == NULL || obj == NULL) {
 		return;
@@ -13,7 +13,7 @@ void gc_worklist_push(GcWorklist* wl, GcHeader* obj) {
 	}
 
 	new_capacity = (wl->capacity > 0) ? (wl->capacity * 2) : 16;
-	new_data     = (GcHeader**)realloc(wl->data, (size_t)new_capacity * sizeof(GcHeader*));
+	new_data     = (gc_header**)realloc(wl->data, (size_t)new_capacity * sizeof(gc_header*));
 	if (new_data == NULL) {
 		return;
 	}
@@ -23,7 +23,7 @@ void gc_worklist_push(GcWorklist* wl, GcHeader* obj) {
 	wl->data[wl->top++] = obj;
 }
 
-GcHeader* gc_worklist_pop(GcWorklist* wl) {
+gc_header* gc_worklist_pop(gc_worklist* wl) {
 	if (wl == NULL || wl->top <= 0) {
 		return NULL;
 	}

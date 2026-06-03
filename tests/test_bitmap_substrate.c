@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 int main(void) {
-	GcBitmap bitmap;
+	gc_bitmap bitmap;
 
 	gc_bitmap_init(&bitmap, 10u);
 	assert(bitmap.bit_count == 10u);
@@ -53,4 +53,3 @@ int main(void) {
 	assert(bitmap.bits == NULL);
 	return EXIT_SUCCESS;
 }
-

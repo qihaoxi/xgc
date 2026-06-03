@@ -1,8 +1,9 @@
 #include "gc_internal.h"
 
-void gc_trace_object_slots_in_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
-	const GcDescriptor* desc;
-	size_t              object_size;
+void gc_trace_object_slots_in_range(gc_header* obj, size_t byte_begin, size_t byte_end, gc_visit_slot_fn visit_slot,
+                                    void* ctx) {
+	const gc_descriptor* desc;
+	size_t               object_size;
 
 	if (obj == NULL || visit_slot == NULL) {
 		return;
@@ -37,4 +38,3 @@ void gc_trace_object_slots_in_range(GcHeader* obj, size_t byte_begin, size_t byt
 		desc->trace_slots(obj, visit_slot, ctx);
 	}
 }
-

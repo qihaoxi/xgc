@@ -1,6 +1,6 @@
 #include "gc_internal.h"
 
-void gc_heap_init(GcHeap* heap, size_t large_object_threshold) {
+void gc_heap_init(gc_heap* heap, size_t large_object_threshold) {
 	if (heap == NULL) {
 		return;
 	}
@@ -9,7 +9,7 @@ void gc_heap_init(GcHeap* heap, size_t large_object_threshold) {
 	heap->large_object_threshold = large_object_threshold;
 }
 
-void gc_heap_set_young_space(GcRuntime* rt, uint8_t* base, size_t capacity) {
+void gc_heap_set_young_space(gc_runtime* rt, uint8_t* base, size_t capacity) {
 	if (rt == NULL) {
 		return;
 	}
@@ -21,7 +21,7 @@ void gc_heap_set_young_space(GcRuntime* rt, uint8_t* base, size_t capacity) {
 	}
 }
 
-void gc_heap_record_young_alloc(GcRuntime* rt, size_t bytes) {
+void gc_heap_record_young_alloc(gc_runtime* rt, size_t bytes) {
 	if (rt == NULL) {
 		return;
 	}
@@ -29,7 +29,7 @@ void gc_heap_record_young_alloc(GcRuntime* rt, size_t bytes) {
 	rt->heap.young_used += bytes;
 }
 
-void gc_heap_reset_young(GcRuntime* rt) {
+void gc_heap_reset_young(gc_runtime* rt) {
 	if (rt == NULL) {
 		return;
 	}
@@ -37,7 +37,7 @@ void gc_heap_reset_young(GcRuntime* rt) {
 	rt->heap.young_used = 0u;
 }
 
-void gc_heap_record_old_alloc(GcRuntime* rt, size_t bytes) {
+void gc_heap_record_old_alloc(gc_runtime* rt, size_t bytes) {
 	if (rt == NULL) {
 		return;
 	}
@@ -46,7 +46,7 @@ void gc_heap_record_old_alloc(GcRuntime* rt, size_t bytes) {
 	rt->heap.old_object_bytes += bytes;
 }
 
-void gc_heap_record_old_free(GcRuntime* rt, size_t bytes) {
+void gc_heap_record_old_free(gc_runtime* rt, size_t bytes) {
 	if (rt == NULL) {
 		return;
 	}

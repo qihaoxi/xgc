@@ -10,19 +10,21 @@
 extern "C" {
 #endif
 
-typedef struct GcRuntime       GcRuntime;
-typedef struct GcThreadContext GcThreadContext;
-typedef struct GcHandle        GcHandle;
-typedef struct GcDescriptor    GcDescriptor;
-typedef struct GcHeader        GcHeader;
+typedef struct gc_runtime        gc_runtime;
+typedef struct gc_thread_context gc_thread_context;
+typedef struct gc_handle         gc_handle;
+typedef struct gc_descriptor     gc_descriptor;
+typedef struct gc_header         gc_header;
 
-typedef void (*GcVisitObjectFn)(GcHeader* obj, void* ctx);
-typedef void (*GcVisitSlotFn)(GcHeader** slot, void* ctx);
+typedef void (*GcVisitObjectFn)(gc_header* obj, void* ctx);
+typedef void (*gc_visit_slot_fn)(gc_header** slot, void* ctx);
 
-typedef void (*GcTraceSlotsFn)(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx);
-typedef void (*GcTraceEdgesFn)(GcHeader* obj, GcVisitObjectFn visit_obj, void* ctx);
-typedef void (*GcFinalizeFn)(GcHeader* obj);
-typedef void (*GcScanRootsFn)(void* vm_ctx, GcVisitSlotFn visit_root_slot, void* ctx);
+typedef void (*gc_trace_slots_fn)(gc_header* obj, gc_visit_slot_fn visit_slot, void* ctx);
+typedef void (*gc_trace_slots_range_fn)(gc_header* obj, size_t byte_begin, size_t byte_end, gc_visit_slot_fn visit_slot,
+                                        void* ctx);
+typedef void (*gc_trace_edges_fn)(gc_header* obj, GcVisitObjectFn visit_obj, void* ctx);
+typedef void (*gc_finalize_fn)(gc_header* obj);
+typedef void (*gc_scan_roots_fn)(void* vm_ctx, gc_visit_slot_fn visit_root_slot, void* ctx);
 
 enum {
 	GC_DESC_FLAG_CONTAINS_REFS = 1u << 0,
@@ -47,25 +49,26 @@ enum {
 	GC_HANDLE_PINNED  = 1u << 0,
 };
 
-struct GcHeader {
-	const GcDescriptor* desc;
-	uint32_t            size;
-	uint16_t            flags;
-	uint16_t            kind;
+struct gc_header {
+	const gc_descriptor* desc;
+	uint32_t             size;
+	uint16_t             flags;
+	uint16_t             kind;
 };
 
-struct GcDescriptor {
-	const char*    name;
-	uint32_t       fixed_size;
-	uint32_t       flags;
-	uint16_t       kind;
-	uint16_t       reserved;
-	GcTraceSlotsFn trace_slots;
-	GcTraceEdgesFn trace_edges;
-	GcFinalizeFn   finalize;
+struct gc_descriptor {
+	const char*             name;
+	uint32_t                fixed_size;
+	uint32_t                flags;
+	uint16_t                kind;
+	uint16_t                reserved;
+	gc_trace_slots_fn       trace_slots;
+	gc_trace_slots_range_fn trace_slots_range;
+	gc_trace_edges_fn       trace_edges;
+	gc_finalize_fn          finalize;
 };
 
-typedef struct GcConfig {
+typedef struct gc_config {
 	size_t   gc_threshold_soft;
 	size_t   gc_threshold_hard;
 	size_t   gc_young_space_size;
@@ -73,12 +76,12 @@ typedef struct GcConfig {
 	size_t   gc_large_object_threshold;
 	uint32_t gc_flags;
 	int      gc_debug_enable;
-} GcConfig;
+} gc_config;
 
-typedef struct GcVmHooks {
-	GcScanRootsFn scan_roots;
-	void*         vm_ctx;
-} GcVmHooks;
+typedef struct gc_vm_hooks {
+	gc_scan_roots_fn scan_roots;
+	void*            vm_ctx;
+} gc_vm_hooks;
 
 #ifdef __cplusplus
 }

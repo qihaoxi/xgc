@@ -37,6 +37,7 @@ add_custom_target(format
 
 # ---- GC Algorithm select options ----
 # gen_copy_ms/marksweep/bacon-rajan
+set(GC_ALGORITHM "gen_copy_ms" CACHE STRING "GC algorithm to build with")
 set_property(CACHE GC_ALGORITHM PROPERTY STRINGS
     gen_copy_ms
     marksweep

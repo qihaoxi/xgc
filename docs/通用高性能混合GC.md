@@ -323,6 +323,67 @@ algo/gen_copy_ms
 
 > **算法一般不应该直接跳过 `barrier.c` 去手写 remembered set 逻辑，而是优先复用 `core` 里的公共实现。**
 
+#### 0.x.2.1 图一：`core/` 文件依赖图（更直观版）
+如果你更希望看到一张“谁依赖谁”的静态图，可以直接看下面这张：
+
+```text
+                           ┌───────────────────────┐
+                           │ include/xgc/*.h       │
+                           │ 对外 API / 公共类型    │
+                           └───────────┬───────────┘
+                                       │
+                                       ▼
+                           ┌───────────────────────┐
+                           │ src/gc_internal.h     │
+                           │ core/algo 共享内部定义 │
+                           └───────┬───────────────┘
+                                   │
+                  ┌────────────────┼────────────────┐
+                  │                │                │
+                  ▼                ▼                ▼
+        ┌────────────────┐  ┌───────────────┐  ┌────────────────┐
+        │ runtime.c      │  │ heap.c        │  │ worklist.c     │
+        │ 总调度中枢      │  │ heap 状态记录  │  │ tracing 工作栈 │
+        └──────┬─────────┘  └───────────────┘  └────────────────┘
+               │
+               ├──────────────┐
+               │              │
+               ▼              ▼
+      ┌────────────────┐  ┌────────────────┐
+      │ barrier.c      │  │ reclaim.c      │
+      │ 屏障外观层      │  │ 终结/释放对象   │
+      └──────┬─────────┘  └────────────────┘
+             │
+             ▼
+      ┌────────────────┐
+      │ card_table.c   │
+      │ dirty-card 管理 │
+      └──────┬─────────┘
+             │
+             ▼
+      ┌────────────────┐
+      │ bitmap.c       │
+      │ 位图底层工具    │
+      └────────────────┘
+
+      ┌────────────────┐
+      │ descriptor.c   │
+      │ 范围扫描 helper │
+      └────────────────┘
+
+      ┌──────────────────────────────────────────────────────┐
+      │ 预留文件：atomic.c / epoch.c / purple.c / ring.c    │
+      │ 对应多线程、并发 GC、RC-cycle、快速分配等未来方向     │
+      └──────────────────────────────────────────────────────┘
+```
+
+这张图最好记的地方是：
+
+- `runtime.c` 是中枢
+- `barrier.c -> card_table.c -> bitmap.c` 是一条 remembered-set 元数据链
+- `descriptor.c` 是“精细对象扫描”的公共辅助点
+- `worklist.c` 和 `reclaim.c` 是 tracing 算法最常复用的两个基础件
+
 ### 0.x.3 `runtime.c` 为什么是“总中枢”
 
 如果你只能先读一个文件，那最值得先读的是 `src/core/runtime.c`。
@@ -389,6 +450,93 @@ algo/gen_copy_ms
 - 然后对 old objects 做 mark
 - 最后 sweep 掉 old 中不可达对象
 
+#### 0.x.4.1 图二：`gen_copy_ms` 关键时序图
+如果你想理解“算法到底怎么转起来的”，这张图比单看函数名更有帮助：
+
+```text
+业务代码 / VM
+  │
+  │ 1. 分配对象
+  ▼
+gc_alloc_typed(...)
+  │
+  ▼
+runtime.c
+  │
+  ▼
+gen_copy_ms::alloc(...)
+  │
+  ├─ 小对象 -> young space bump allocate
+  └─ 大对象 / pinned -> old object + barrier_register_owner
+
+
+业务代码 / VM
+  │
+  │ 2. 写入引用 owner->slot = new_value
+  ▼
+gc_store_ref(rt, thread, owner, slot, new_value)
+  │
+  ├─ runtime.c 先执行真实写入
+  ▼
+gen_copy_ms::write_barrier(...)
+  │
+  ├─ 如果不是 old -> young 写入：直接返回
+  └─ 如果是 old -> young 写入：
+        gc_barrier_mark_slot_dirty(rt, owner, slot)
+          -> barrier.c
+          -> card_table.c
+          -> bitmap.c
+
+
+业务代码 / VM
+  │
+  │ 3. 触发 minor GC
+  ▼
+gc_collect_minor(rt)
+  │
+  ▼
+runtime.c
+  │
+  ▼
+gen_copy_ms::collect_minor(...)
+  │
+  ├─ 扫 handles
+  ├─ 扫 VM roots（hooks.scan_roots）
+  ├─ 遍历 dirty cards
+  │    -> barrier.c
+  │    -> card_table.c
+  │    -> descriptor.c (trace_slots_range)
+  ├─ 命中 young 对象则 promotion
+  ├─ promoted 对象入 worklist
+  ├─ worklist.c 持续 drain
+  ├─ finalize 死掉的 young 对象
+  └─ heap.c 重置 young 统计
+
+
+业务代码 / VM
+  │
+  │ 4. 触发 full GC
+  ▼
+gc_collect_full(rt)
+  │
+  ▼
+runtime.c
+  │
+  ▼
+gen_copy_ms::collect_full(...)
+  │
+  ├─ 先做 minor
+  ├─ mark old objects
+  ├─ worklist.c drain
+  └─ reclaim.c sweep 死亡 old objects
+```
+
+这张图最想表达的不是“函数名很多”，而是三件事：
+
+1. **所有外部动作都先经过 `runtime.c`**
+2. **写屏障不是直接写一堆私有逻辑，而是尽量走 `barrier/card_table/bitmap` 公共链路**
+3. **minor GC 的 remembered-set 扫描已经是“slot 标脏 -> dirty card -> card-range 扫描”这条完整路径**
+
 ### 0.x.5 从三个入口建立动态心智模型
 
 如果你想快速理解“算法到底怎么转起来”，最好的方法不是从头到尾死读代码，而是盯住三个入口：
@@ -441,6 +589,143 @@ algo/gen_copy_ms
 > **外部通过统一 API 与 runtime 交互，runtime 把请求分发给算法；算法尽量复用 `core` 的公共零件完成分配、写屏障和收集。**
 
 这句话基本就把静态结构和动态流程都串起来了。
+
+### 0.x.8 为什么会做这个 GC：来自 Rhino / `polyglot-c` 的问题驱动
+
+这个项目并不是“凭空想做一个新 GC 框架”，而是有非常现实的来源：
+
+> `/home/clouder/workspace/raw-spofer-rhino` 里的 VM / `polyglot-c` 实现，其 GC 和对象生命周期设计存在结构性问题，已经影响正确性、可维护性和长期演进。
+
+结合 `analysis.md`、`code-quality.md` 和 `polyglot-c/docs/rhino-gc-guide.md`，可以把原始动机概括成下面几条。
+
+#### 0.x.8.1 Rhino 现有实现的核心问题
+
+##### 问题 1：RC 和 tracing GC 是两套互相打架的生命周期模型
+`analysis.md` 明确指出，Rhino 继承了 Vim 风格的引用计数（RC）路径，同时又嫁接了一套标记-清扫（mark-sweep）路径，但两者没有统一。
+
+这会导致：
+
+- RC 在某些路径上还在减 refcount
+- GC sweep 又按另一套规则释放对象
+- 两边都觉得自己“有权处理对象生命周期”
+
+结果就是：
+
+- 有些对象该活时被 sweep 掉
+- 有些对象该死时因为环永远不死
+- 设计层面很难证明正确性
+
+##### 问题 2：GC 触发逻辑存在，但运行期实际上没真正接通
+分析文档指出：
+
+- `try_to_collect_garbage()` 会去调用 `f_garbagecollect()`
+- 但 `f_garbagecollect()` 只是设置标志位
+- 没有代码真正消费这个标志位去执行完整 GC
+
+这意味着：
+
+> **GC 看起来“有”，但在运行期实际上经常并没有真正工作。**
+
+##### 问题 3：root scanning 不完整，关键 mark 函数还是空实现
+`analysis.md` 里列出的几个函数：
+
+- `set_ref_in_previous_funccal()`
+- `set_ref_in_call_stack()`
+- `set_ref_in_func_args()`
+- `free_unref_funccal()`
+
+都还是 stub。
+
+这意味着执行栈、函数参数、调用链等关键 root 根本没有被可靠纳入 GC 可见范围。
+
+换句话说：
+
+> **GC 连“谁是活对象”都看不全，就谈不上正确回收。**
+
+##### 问题 4：对象遍历不完整，只能覆盖部分类型
+根据分析文档，当前 sweep 主要只覆盖 `dict` 和 `list`，很多参与引用图的对象类型并没有被完整纳入 tracing 路径，例如：
+
+- `partial_t`
+- `userfunc_t`
+- `future_t`
+- `generator_t`
+
+这意味着只要这些类型参与了环或中间引用链，就可能出现：
+
+- 永久泄漏
+- 引用图断裂
+- GC 可见性不完整
+
+##### 问题 5：内部对象和用户对象混在同一条 GC 链上
+分析文档提到：`dict_alloc()` / `list_alloc()` 无条件进入同一个 GC 链表。
+
+这会导致：
+
+- VM 内部元数据对象
+- 用户脚本层对象
+
+被混在同一套回收逻辑里处理。
+
+这在工程上会带来两个很大的问题：
+
+1. GC 规则很难分层
+2. 一旦 root/mark 漏掉某条内部引用，内部基础设施也可能被错误处理
+
+##### 问题 6：对象生命周期和 refcount 规则散落在很多类型里
+`analysis.md` 列出了大量不统一的 refcount 字段命名：
+
+- `dv_refcount`
+- `lv_refcount`
+- `pt_refcount`
+- `ref_count`
+- `refcount`
+
+这反映出一个更深层的问题：
+
+> **对象生命周期没有统一抽象，而是按类型不断追加、不断分叉。**
+
+这会直接导致：
+
+- 很难建立统一的对象模型
+- 很难替换 GC 算法
+- 很难做精确 root scanning 和移动对象支持
+
+#### 0.x.8.2 这些问题如何映射到 `xgc` 的设计决策
+
+下面这张表，就是“Rhino 的问题”与“`xgc` 的设计决策”之间的对应关系：
+
+| Rhino / `polyglot-c` 暴露的问题 | `xgc` 的对应设计 |
+|---|---|
+| RC 与 tracing GC 两套生命周期打架 | 统一 `GcRuntime + GcAlgorithmVTable`，算法通过同一入口挂接，而不是混杂在对象类型代码里 |
+| GC 触发逻辑不闭环 | `gc_collect_minor/full` 统一从 `runtime.c` 分发，运行链路明确 |
+| roots 扫描不完整 | 强调 `GcVmHooks.scan_roots` + slot 级扫描，把 roots 当成第一等接口 |
+| 只覆盖部分对象类型 | 通过 `GcDescriptor` 统一对象遍历接口，而不是给每种对象单独拼补丁 |
+| 内部对象与用户对象混用 | 设计上强调公共基础层、算法层、VM 接入层分层，逐步把内部基础设施从“业务对象模型”里拆开 |
+| refcount 字段与生命周期规则碎片化 | 公共对象头最小化，算法元数据尽量放 side metadata 或算法私有状态 |
+| remembered set / barrier 缺失或混乱 | 把 `barrier.c` / `card_table.c` / `bitmap.c` 抽成公共能力 |
+| 很难演进到分代 / moving GC | 从一开始要求 descriptor、slot tracing、pin/handle、young/old 空间抽象 |
+
+#### 0.x.8.3 为什么 `xgc` 不是直接“修 Rhino 的现有 GC 代码”
+
+因为从这些分析可以看出，问题并不只是几个 bug，而是**对象模型、生命周期模型、root 模型、GC 触发链路、内部/用户对象边界**都纠缠在一起。
+
+这类问题如果直接在旧代码上打补丁，通常会出现：
+
+- 修掉一个泄漏，又引入另一条悬空引用
+- 修掉一个 sweep 误释放，又让某些环永久无法回收
+- 新增一个对象类型，又要补很多分散的 refcount / mark / free 逻辑
+
+所以 `xgc` 的出发点更像是：
+
+> **先把 GC 的通用框架和公共零件重建出来，再考虑怎样把旧 VM 的对象系统逐步迁移上来。**
+
+换句话说，`xgc` 不是“对 Rhino 现有 GC 的小修小补”，而是一次**架构重整后的可复用 GC 底座**。
+
+#### 0.x.8.4 用一句话总结这层动机
+
+如果要把这层背景压缩成一句最容易记住的话，就是：
+
+> **`xgc` 的存在，不是因为“想做一个很酷的新 GC”，而是因为旧 VM 的对象生命周期和 GC 代码已经难以通过局部修补继续演进。**
 ---
 ## 1. 设计目标
 ## 1.1 总目标

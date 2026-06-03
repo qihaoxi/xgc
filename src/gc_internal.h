@@ -11,7 +11,7 @@
 /* ============================================================================
  * 内部头文件 — 库内部使用，用户不可见
  *
- * 包含: 原子类型封装、GcHeader 完整定义、GcGlobalContext / GcThreadContext
+ * 包含: 原子类型封装、gc_header 完整定义、GcGlobalContext / gc_thread_context
  *        完整定义、显式工作栈、Epoch 状态（多线程）、内部辅助宏
  * ============================================================================
  */
@@ -55,16 +55,16 @@ typedef int     gc_atomic_int_t;
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
-	GcHeader** data;
-	int        top;
-	int        capacity;
-} GcWorklist;
+	gc_header** data;
+	int         top;
+	int         capacity;
+} gc_worklist;
 
 typedef struct {
 	uint8_t* bits;
 	size_t   bit_count;
 	size_t   byte_count;
-} GcBitmap;
+} gc_bitmap;
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * 4. 运行时与线程内部结构
@@ -74,22 +74,22 @@ typedef enum {
 	GC_STATE_RUNNING         = 0,
 	GC_STATE_STW_REQUESTED   = 1,
 	GC_STATE_STW_IN_PROGRESS = 2,
-} GcRuntimeState;
+} gc_runtime_state;
 
 typedef struct {
 	uintptr_t owner_base;
 	size_t    owner_size;
 	size_t    card_count;
 	size_t    dirty_card_count;
-	GcBitmap  dirty_map;
-} GcCardEntry;
+	gc_bitmap dirty_map;
+} gc_card_entry;
 
 typedef struct {
-	GcCardEntry* entries;
-	size_t       count;
-	size_t       capacity;
-	size_t       card_granularity;
-} GcCardTable;
+	gc_card_entry* entries;
+	size_t         count;
+	size_t         capacity;
+	size_t         card_granularity;
+} gc_card_table;
 
 typedef struct {
 	uint8_t* young_base;
@@ -98,13 +98,13 @@ typedef struct {
 	size_t   large_object_threshold;
 	size_t   old_object_count;
 	size_t   old_object_bytes;
-} GcHeap;
+} gc_heap;
 
 typedef struct {
-	GcCardTable old_to_young;
-	size_t      dirty_old_objects;
-	size_t      dirty_cards;
-} GcBarrierSet;
+	gc_card_table old_to_young;
+	size_t        dirty_old_objects;
+	size_t        dirty_cards;
+} gc_barrier_set;
 
 typedef struct {
 	size_t total_allocated;
@@ -112,114 +112,115 @@ typedef struct {
 	size_t minor_collections;
 	size_t major_collections;
 	size_t full_collections;
-} GcStats;
+} gc_stats;
 
 typedef struct {
 	void* placeholder;
-} GcScheduler;
+} gc_scheduler;
 
-struct GcRuntime {
-	GcConfig                 cfg;
-	const GcAlgorithmVTable* algo;
-	GcVmHooks                hooks;
-	GcHeap                   heap;
-	GcScheduler              sched;
-	GcBarrierSet             barriers;
-	GcStats                  stats;
-	void*                    algo_state;
-	GcHandle*                handles;
-	GcHeader**               worklist_data;
-	int                      worklist_capacity;
-	gc_atomic_int_t          gc_state;
+struct gc_runtime {
+	gc_config                  cfg;
+	const gc_algorithm_vtable* algo;
+	gc_vm_hooks                hooks;
+	gc_heap                    heap;
+	gc_scheduler               sched;
+	gc_barrier_set             barriers;
+	gc_stats                   stats;
+	void*                      algo_state;
+	gc_handle*                 handles;
+	gc_header**                worklist_data;
+	int                        worklist_capacity;
+	gc_atomic_int_t            gc_state;
 };
 
-struct GcThreadContext {
-	GcRuntime* runtime;
-	void*      vm_thread_ctx;
-	void*      algo_state;
+struct gc_thread_context {
+	gc_runtime* runtime;
+	void*       vm_thread_ctx;
+	void*       algo_state;
 };
 
-struct GcHandle {
-	GcRuntime* runtime;
-	GcHeader*  target;
-	uint32_t   flags;
-	GcHandle*  next;
+struct gc_handle {
+	gc_runtime* runtime;
+	gc_header*  target;
+	uint32_t    flags;
+	gc_handle*  next;
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * 5. 内部函数声明
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-void gc_runtime_apply_default_config(GcConfig* cfg);
+void gc_runtime_apply_default_config(gc_config* cfg);
 
 /* heap substrate */
-void gc_heap_init(GcHeap* heap, size_t large_object_threshold);
-void gc_heap_set_young_space(GcRuntime* rt, uint8_t* base, size_t capacity);
-void gc_heap_record_young_alloc(GcRuntime* rt, size_t bytes);
-void gc_heap_reset_young(GcRuntime* rt);
-void gc_heap_record_old_alloc(GcRuntime* rt, size_t bytes);
-void gc_heap_record_old_free(GcRuntime* rt, size_t bytes);
+void gc_heap_init(gc_heap* heap, size_t large_object_threshold);
+void gc_heap_set_young_space(gc_runtime* rt, uint8_t* base, size_t capacity);
+void gc_heap_record_young_alloc(gc_runtime* rt, size_t bytes);
+void gc_heap_reset_young(gc_runtime* rt);
+void gc_heap_record_old_alloc(gc_runtime* rt, size_t bytes);
+void gc_heap_record_old_free(gc_runtime* rt, size_t bytes);
 
 /* bitmap substrate */
-void gc_bitmap_init(GcBitmap* bitmap, size_t bit_count);
-void gc_bitmap_destroy(GcBitmap* bitmap);
-int  gc_bitmap_resize(GcBitmap* bitmap, size_t bit_count);
-void gc_bitmap_clear_all(GcBitmap* bitmap);
-void gc_bitmap_set(GcBitmap* bitmap, size_t index);
-void gc_bitmap_clear(GcBitmap* bitmap, size_t index);
-int  gc_bitmap_test(const GcBitmap* bitmap, size_t index);
+void gc_bitmap_init(gc_bitmap* bitmap, size_t bit_count);
+void gc_bitmap_destroy(gc_bitmap* bitmap);
+int  gc_bitmap_resize(gc_bitmap* bitmap, size_t bit_count);
+void gc_bitmap_clear_all(gc_bitmap* bitmap);
+void gc_bitmap_set(gc_bitmap* bitmap, size_t index);
+void gc_bitmap_clear(gc_bitmap* bitmap, size_t index);
+int  gc_bitmap_test(const gc_bitmap* bitmap, size_t index);
 
 /* descriptor helpers */
-void gc_trace_object_slots_in_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx);
+void gc_trace_object_slots_in_range(gc_header* obj, size_t byte_begin, size_t byte_end, gc_visit_slot_fn visit_slot,
+                                    void* ctx);
 
-typedef void (*GcVisitDirtyCardFn)(GcHeader* owner, size_t card_index, void* ctx);
+typedef void (*GcVisitDirtyCardFn)(gc_header* owner, size_t card_index, void* ctx);
 
 /* card-table substrate */
-void gc_card_table_init(GcCardTable* table, size_t card_granularity);
-void gc_card_table_destroy(GcCardTable* table);
-int  gc_card_table_register_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner, size_t owner_size);
-void gc_card_table_unregister_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner);
-void gc_card_table_mark_slot(GcRuntime* rt, GcCardTable* table, const GcHeader* owner, const void* slot_addr);
-void gc_card_table_mark_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner);
-int  gc_card_table_owner_is_dirty(const GcCardTable* table, const GcHeader* owner);
-void gc_card_table_clear_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner);
-void gc_card_table_visit_dirty(const GcCardTable* table, GcVisitDirtyCardFn visit, void* ctx);
+void gc_card_table_init(gc_card_table* table, size_t card_granularity);
+void gc_card_table_destroy(gc_card_table* table);
+int  gc_card_table_register_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner, size_t owner_size);
+void gc_card_table_unregister_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner);
+void gc_card_table_mark_slot(gc_runtime* rt, gc_card_table* table, const gc_header* owner, const void* slot_addr);
+void gc_card_table_mark_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner);
+int  gc_card_table_owner_is_dirty(const gc_card_table* table, const gc_header* owner);
+void gc_card_table_clear_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner);
+void gc_card_table_visit_dirty(const gc_card_table* table, GcVisitDirtyCardFn visit, void* ctx);
 
 /* barrier/card-table substrate */
-void gc_barrier_set_init(GcBarrierSet* barriers, size_t card_granularity);
-void gc_barrier_set_destroy(GcBarrierSet* barriers);
-int  gc_barrier_register_owner(GcRuntime* rt, const GcHeader* owner, size_t owner_size);
-void gc_barrier_unregister_owner(GcRuntime* rt, const GcHeader* owner);
-void gc_barrier_mark_slot_dirty(GcRuntime* rt, const GcHeader* owner, const void* slot_addr);
-void gc_barrier_mark_owner_dirty(GcRuntime* rt, const GcHeader* owner);
-int  gc_barrier_is_owner_dirty(const GcRuntime* rt, const GcHeader* owner);
-void gc_barrier_clear_owner_dirty(GcRuntime* rt, const GcHeader* owner);
-void gc_barrier_visit_dirty_cards(const GcRuntime* rt, GcVisitDirtyCardFn visit, void* ctx);
+void gc_barrier_set_init(gc_barrier_set* barriers, size_t card_granularity);
+void gc_barrier_set_destroy(gc_barrier_set* barriers);
+int  gc_barrier_register_owner(gc_runtime* rt, const gc_header* owner, size_t owner_size);
+void gc_barrier_unregister_owner(gc_runtime* rt, const gc_header* owner);
+void gc_barrier_mark_slot_dirty(gc_runtime* rt, const gc_header* owner, const void* slot_addr);
+void gc_barrier_mark_owner_dirty(gc_runtime* rt, const gc_header* owner);
+int  gc_barrier_is_owner_dirty(const gc_runtime* rt, const gc_header* owner);
+void gc_barrier_clear_owner_dirty(gc_runtime* rt, const gc_header* owner);
+void gc_barrier_visit_dirty_cards(const gc_runtime* rt, GcVisitDirtyCardFn visit, void* ctx);
 
 /* gc_worklist.c */
-void      gc_worklist_push(GcWorklist* wl, GcHeader* obj);
-GcHeader* gc_worklist_pop(GcWorklist* wl);
+void       gc_worklist_push(gc_worklist* wl, gc_header* obj);
+gc_header* gc_worklist_pop(gc_worklist* wl);
 
 /* gc_ring.c */
-void* gc_try_ring_buffer_alloc(GcThreadContext* thread, size_t size);
-void  gc_reclaim_ring_buffer_slots(GcRuntime* rt, GcThreadContext* thread);
+void* gc_try_ring_buffer_alloc(gc_thread_context* thread, size_t size);
+void  gc_reclaim_ring_buffer_slots(gc_runtime* rt, gc_thread_context* thread);
 
 /* gc_reclaim.c */
-void gc_reclaim_object(GcRuntime* rt, GcHeader* obj);
+void gc_reclaim_object(gc_runtime* rt, gc_header* obj);
 
 /* gc_purple.c */
-void gc_push_purple_adaptive(GcRuntime* rt, GcThreadContext* thread, GcHeader* obj);
+void gc_push_purple_adaptive(gc_runtime* rt, gc_thread_context* thread, gc_header* obj);
 
 /* gc_epoch.c (GC_MULTITHREAD only) */
-void gc_signal_background_thread(GcRuntime* rt);
-void gc_wait_for_signal(GcRuntime* rt);
+void gc_signal_background_thread(gc_runtime* rt);
+void gc_wait_for_signal(gc_runtime* rt);
 
 /* bacon-rajan algorithm hooks */
-void gc_bacon_rajan_write_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHeader** slot,
-                                  GcHeader* old_value, GcHeader* new_value);
-void gc_bacon_rajan_collect_minor(GcRuntime* rt);
-void gc_bacon_rajan_collect_major(GcRuntime* rt);
-void gc_bacon_rajan_collect_full(GcRuntime* rt);
-void gc_enter_safepoint_and_park(GcRuntime* rt, GcThreadContext* thread);
+void gc_bacon_rajan_write_barrier(gc_runtime* rt, gc_thread_context* thread, gc_header* owner, gc_header** slot,
+                                  gc_header* old_value, gc_header* new_value);
+void gc_bacon_rajan_collect_minor(gc_runtime* rt);
+void gc_bacon_rajan_collect_major(gc_runtime* rt);
+void gc_bacon_rajan_collect_full(gc_runtime* rt);
+void gc_enter_safepoint_and_park(gc_runtime* rt, gc_thread_context* thread);
 
 #endif /* XGC_GC_INTERNAL_H */

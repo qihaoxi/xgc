@@ -1,41 +1,41 @@
 #include "gc_internal.h"
 
-void gc_bacon_rajan_write_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHeader** slot,
-                                  GcHeader* old_value, GcHeader* new_value);
-void gc_bacon_rajan_collect_minor(GcRuntime* rt);
-void gc_bacon_rajan_collect_major(GcRuntime* rt);
-void gc_bacon_rajan_collect_full(GcRuntime* rt);
+void gc_bacon_rajan_write_barrier(gc_runtime* rt, gc_thread_context* thread, gc_header* owner, gc_header** slot,
+                                  gc_header* old_value, gc_header* new_value);
+void gc_bacon_rajan_collect_minor(gc_runtime* rt);
+void gc_bacon_rajan_collect_major(gc_runtime* rt);
+void gc_bacon_rajan_collect_full(gc_runtime* rt);
 
-static void gc_bacon_rajan_global_init(GcRuntime* rt, const GcConfig* cfg) {
+static void gc_bacon_rajan_global_init(gc_runtime* rt, const gc_config* cfg) {
 	(void)cfg;
 	if (rt == NULL) {
 		return;
 	}
 	if (rt->worklist_data == NULL && rt->worklist_capacity > 0) {
-		rt->worklist_data = (GcHeader**)calloc((size_t)rt->worklist_capacity, sizeof(GcHeader*));
+		rt->worklist_data = (gc_header**)calloc((size_t)rt->worklist_capacity, sizeof(gc_header*));
 	}
 }
 
-static void gc_bacon_rajan_global_destroy(GcRuntime* rt) {
+static void gc_bacon_rajan_global_destroy(gc_runtime* rt) {
 	(void)rt;
 }
 
-static void gc_bacon_rajan_thread_init(GcRuntime* rt, GcThreadContext* thread) {
-	(void)rt;
-	(void)thread;
-}
-
-static void gc_bacon_rajan_thread_destroy(GcRuntime* rt, GcThreadContext* thread) {
+static void gc_bacon_rajan_thread_init(gc_runtime* rt, gc_thread_context* thread) {
 	(void)rt;
 	(void)thread;
 }
 
-static void* gc_bacon_rajan_alloc(GcRuntime* rt, GcThreadContext* thread, const GcDescriptor* desc, size_t total_size,
-                                  uint32_t alloc_flags) {
-	GcHeader* obj;
+static void gc_bacon_rajan_thread_destroy(gc_runtime* rt, gc_thread_context* thread) {
+	(void)rt;
+	(void)thread;
+}
+
+static void* gc_bacon_rajan_alloc(gc_runtime* rt, gc_thread_context* thread, const gc_descriptor* desc,
+                                  size_t total_size, uint32_t alloc_flags) {
+	gc_header* obj;
 
 	(void)thread;
-	obj = (GcHeader*)calloc(1, total_size);
+	obj = (gc_header*)calloc(1, total_size);
 	if (obj == NULL) {
 		return NULL;
 	}
@@ -58,32 +58,32 @@ static void* gc_bacon_rajan_alloc(GcRuntime* rt, GcThreadContext* thread, const 
 	return obj;
 }
 
-static void gc_bacon_rajan_post_alloc(GcRuntime* rt, GcHeader* obj) {
+static void gc_bacon_rajan_post_alloc(gc_runtime* rt, gc_header* obj) {
 	(void)rt;
 	(void)obj;
 }
 
-static GcHeader* gc_bacon_rajan_read_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeader** slot) {
+static gc_header* gc_bacon_rajan_read_barrier(gc_runtime* rt, gc_thread_context* thread, gc_header** slot) {
 	(void)rt;
 	(void)thread;
 	return (slot != NULL) ? *slot : NULL;
 }
 
-static void gc_bacon_rajan_pin(GcRuntime* rt, GcHeader* obj) {
+static void gc_bacon_rajan_pin(gc_runtime* rt, gc_header* obj) {
 	(void)rt;
 	if (obj != NULL) {
 		obj->flags = (uint16_t)(obj->flags | GC_OBJECT_FLAG_PINNED);
 	}
 }
 
-static void gc_bacon_rajan_unpin(GcRuntime* rt, GcHeader* obj) {
+static void gc_bacon_rajan_unpin(gc_runtime* rt, gc_header* obj) {
 	(void)rt;
 	if (obj != NULL) {
 		obj->flags = (uint16_t)(obj->flags & ~GC_OBJECT_FLAG_PINNED);
 	}
 }
 
-static const GcAlgorithmVTable GC_BACON_RAJAN_VTABLE = {
+static const gc_algorithm_vtable GC_BACON_RAJAN_VTABLE = {
 	.name = "bacon-rajan",
 	.caps = {
 		.supports_moving = 0,
@@ -110,10 +110,10 @@ static const GcAlgorithmVTable GC_BACON_RAJAN_VTABLE = {
 	.unpin = gc_bacon_rajan_unpin,
 };
 
-const GcAlgorithmVTable* xgc_algorithm_bacon_rajan(void) {
+const gc_algorithm_vtable* xgc_algorithm_bacon_rajan(void) {
 	return &GC_BACON_RAJAN_VTABLE;
 }
 
-const GcAlgorithmVTable* xgc_default_algorithm(void) {
+const gc_algorithm_vtable* xgc_default_algorithm(void) {
 	return xgc_algorithm_bacon_rajan();
 }

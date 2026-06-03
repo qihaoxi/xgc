@@ -1,45 +1,45 @@
 #include "gc_internal.h"
 
-typedef struct GcGenOldNode {
-	GcHeader*            obj;
-	uint8_t              marked;
-	struct GcGenOldNode* next;
-} GcGenOldNode;
+typedef struct gc_gen_old_node {
+	GcHeader*               obj;
+	uint8_t                 marked;
+	struct gc_gen_old_node* next;
+} gc_gen_old_node;
 
-typedef struct GcGenForward {
-	GcHeader*            from;
-	GcHeader*            to;
-	struct GcGenForward* next;
-} GcGenForward;
-
-typedef struct {
-	uint8_t*      nursery_space;
-	size_t        nursery_capacity;
-	size_t        nursery_used;
-	GcGenOldNode* old_objects;
-	GcGenForward* forwarded;
-} GcGenCopyMsState;
+typedef struct gc_gen_forward {
+	GcHeader*              from;
+	GcHeader*              to;
+	struct gc_gen_forward* next;
+} gc_gen_forward;
 
 typedef struct {
-	GcRuntime*        rt;
-	GcGenCopyMsState* state;
-	GcWorklist*       wl;
-} GcGenMinorCtx;
+	uint8_t*         nursery_space;
+	size_t           nursery_capacity;
+	size_t           nursery_used;
+	gc_gen_old_node* old_objects;
+	gc_gen_forward*  forwarded;
+} gc_gen_copy_ms_state;
 
 typedef struct {
-	GcRuntime*        rt;
-	GcGenCopyMsState* state;
-	GcWorklist*       wl;
-} GcGenMarkCtx;
+	GcRuntime*            rt;
+	gc_gen_copy_ms_state* state;
+	gc_worklist*          wl;
+} gc_gen_minor_ctx;
 
 typedef struct {
-	GcGenMinorCtx* minor;
-	GcHeader**     owners_to_clear;
-	size_t         owner_count;
-	size_t         owner_capacity;
-} GcGenDirtyCardVisitCtx;
+	GcRuntime*            rt;
+	gc_gen_copy_ms_state* state;
+	gc_worklist*          wl;
+} gc_gen_mark_ctx;
 
-static int gc_gen_dirty_visit_remember_owner(GcGenDirtyCardVisitCtx* visit_ctx, GcHeader* owner) {
+typedef struct {
+	gc_gen_minor_ctx* minor;
+	GcHeader**        owners_to_clear;
+	size_t            owner_count;
+	size_t            owner_capacity;
+} gc_gen_dirty_card_visit_ctx;
+
+static int gc_gen_dirty_visit_remember_owner(gc_gen_dirty_card_visit_ctx* visit_ctx, GcHeader* owner) {
 	GcHeader** new_items;
 	size_t     new_capacity;
 	size_t     i;
@@ -69,7 +69,7 @@ static int gc_gen_dirty_visit_remember_owner(GcGenDirtyCardVisitCtx* visit_ctx, 
 	return 1;
 }
 
-static void gc_gen_dirty_visit_clear_owners(GcGenDirtyCardVisitCtx* visit_ctx) {
+static void gc_gen_dirty_visit_clear_owners(gc_gen_dirty_card_visit_ctx* visit_ctx) {
 	size_t i;
 
 	if (visit_ctx == NULL || visit_ctx->minor == NULL) {
@@ -86,11 +86,11 @@ static void gc_gen_dirty_visit_clear_owners(GcGenDirtyCardVisitCtx* visit_ctx) {
 	visit_ctx->owner_capacity  = 0u;
 }
 
-static GcGenCopyMsState* gc_gen_state(GcRuntime* rt) {
-	return (GcGenCopyMsState*)((rt != NULL) ? rt->algo_state : NULL);
+static gc_gen_copy_ms_state* gc_gen_state(GcRuntime* rt) {
+	return (gc_gen_copy_ms_state*)((rt != NULL) ? rt->algo_state : NULL);
 }
 
-static int gc_gen_in_nursery(GcGenCopyMsState* state, GcHeader* obj) {
+static int gc_gen_in_nursery(gc_gen_copy_ms_state* state, GcHeader* obj) {
 	uintptr_t p;
 	uintptr_t start;
 	uintptr_t end;
@@ -103,8 +103,8 @@ static int gc_gen_in_nursery(GcGenCopyMsState* state, GcHeader* obj) {
 	return p >= start && p < end;
 }
 
-static GcGenForward* gc_gen_find_forward(GcGenCopyMsState* state, GcHeader* obj) {
-	GcGenForward* it;
+static gc_gen_forward* gc_gen_find_forward(gc_gen_copy_ms_state* state, GcHeader* obj) {
+	gc_gen_forward* it;
 	for (it = (state != NULL) ? state->forwarded : NULL; it != NULL; it = it->next) {
 		if (it->from == obj) {
 			return it;
@@ -113,8 +113,8 @@ static GcGenForward* gc_gen_find_forward(GcGenCopyMsState* state, GcHeader* obj)
 	return NULL;
 }
 
-static GcGenOldNode* gc_gen_find_old_node(GcGenCopyMsState* state, GcHeader* obj) {
-	GcGenOldNode* it;
+static gc_gen_old_node* gc_gen_find_old_node(gc_gen_copy_ms_state* state, GcHeader* obj) {
+	gc_gen_old_node* it;
 	for (it = (state != NULL) ? state->old_objects : NULL; it != NULL; it = it->next) {
 		if (it->obj == obj) {
 			return it;
@@ -123,12 +123,12 @@ static GcGenOldNode* gc_gen_find_old_node(GcGenCopyMsState* state, GcHeader* obj
 	return NULL;
 }
 
-static int gc_gen_add_old_node(GcRuntime* rt, GcGenCopyMsState* state, GcHeader* obj) {
-	GcGenOldNode* node;
+static int gc_gen_add_old_node(GcRuntime* rt, gc_gen_copy_ms_state* state, GcHeader* obj) {
+	gc_gen_old_node* node;
 	if (rt == NULL || state == NULL || obj == NULL) {
 		return 0;
 	}
-	node = (GcGenOldNode*)calloc(1, sizeof(*node));
+	node = (gc_gen_old_node*)calloc(1, sizeof(*node));
 	if (node == NULL) {
 		return 0;
 	}
@@ -152,9 +152,9 @@ static void gc_gen_remove_old_node_accounting(GcRuntime* rt, GcHeader* obj) {
 	gc_heap_record_old_free(rt, obj->size);
 }
 
-static void gc_gen_clear_forwarding(GcGenCopyMsState* state) {
-	GcGenForward* it;
-	GcGenForward* next;
+static void gc_gen_clear_forwarding(gc_gen_copy_ms_state* state) {
+	gc_gen_forward* it;
+	gc_gen_forward* next;
 	if (state == NULL) {
 		return;
 	}
@@ -165,10 +165,10 @@ static void gc_gen_clear_forwarding(GcGenCopyMsState* state) {
 	state->forwarded = NULL;
 }
 
-static GcHeader* gc_gen_promote(GcGenMinorCtx* ctx, GcHeader* obj) {
-	GcGenForward* fwd;
-	GcHeader*     copy;
-	GcGenForward* node;
+static GcHeader* gc_gen_promote(gc_gen_minor_ctx* ctx, GcHeader* obj) {
+	gc_gen_forward* fwd;
+	GcHeader*       copy;
+	gc_gen_forward* node;
 	if (ctx == NULL || obj == NULL || !gc_gen_in_nursery(ctx->state, obj)) {
 		return obj;
 	}
@@ -181,7 +181,7 @@ static GcHeader* gc_gen_promote(GcGenMinorCtx* ctx, GcHeader* obj) {
 		return obj;
 	}
 	memcpy(copy, obj, obj->size);
-	node = (GcGenForward*)calloc(1, sizeof(*node));
+	node = (gc_gen_forward*)calloc(1, sizeof(*node));
 	if (node == NULL) {
 		free(copy);
 		return obj;
@@ -206,15 +206,15 @@ static GcHeader* gc_gen_promote(GcGenMinorCtx* ctx, GcHeader* obj) {
 }
 
 static void gc_gen_evacuate_slot(GcHeader** slot, void* ctx) {
-	GcGenMinorCtx* minor = (GcGenMinorCtx*)ctx;
+	gc_gen_minor_ctx* minor = (gc_gen_minor_ctx*)ctx;
 	if (slot == NULL || *slot == NULL) {
 		return;
 	}
 	*slot = gc_gen_promote(minor, *slot);
 }
 
-static void gc_gen_minor_scan_handles(GcGenMinorCtx* ctx) {
-	GcHandle* handle;
+static void gc_gen_minor_scan_handles(gc_gen_minor_ctx* ctx) {
+	gc_handle* handle;
 	if (ctx == NULL || ctx->rt == NULL) {
 		return;
 	}
@@ -224,11 +224,11 @@ static void gc_gen_minor_scan_handles(GcGenMinorCtx* ctx) {
 }
 
 static void gc_gen_minor_visit_dirty_card(GcHeader* owner, size_t card_index, void* ctx) {
-	GcGenDirtyCardVisitCtx* visit_ctx = (GcGenDirtyCardVisitCtx*)ctx;
-	GcGenMinorCtx*          minor;
-	size_t                  card_size;
-	size_t                  byte_begin;
-	size_t                  byte_end;
+	gc_gen_dirty_card_visit_ctx* visit_ctx = (gc_gen_dirty_card_visit_ctx*)ctx;
+	gc_gen_minor_ctx*            minor;
+	size_t                       card_size;
+	size_t                       byte_begin;
+	size_t                       byte_end;
 
 	if (visit_ctx == NULL || owner == NULL) {
 		return;
@@ -248,8 +248,8 @@ static void gc_gen_minor_visit_dirty_card(GcHeader* owner, size_t card_index, vo
 	}
 }
 
-static void gc_gen_minor_scan_dirty_cards(GcGenMinorCtx* ctx) {
-	GcGenDirtyCardVisitCtx visit_ctx;
+static void gc_gen_minor_scan_dirty_cards(gc_gen_minor_ctx* ctx) {
+	gc_gen_dirty_card_visit_ctx visit_ctx;
 
 	if (ctx == NULL || ctx->rt == NULL) {
 		return;
@@ -261,7 +261,7 @@ static void gc_gen_minor_scan_dirty_cards(GcGenMinorCtx* ctx) {
 	gc_gen_dirty_visit_clear_owners(&visit_ctx);
 }
 
-static void gc_gen_minor_drain(GcGenMinorCtx* ctx) {
+static void gc_gen_minor_drain(gc_gen_minor_ctx* ctx) {
 	GcHeader* obj;
 	while ((obj = gc_worklist_pop(ctx->wl)) != NULL) {
 		if (obj->desc != NULL && obj->desc->trace_slots != NULL) {
@@ -270,7 +270,7 @@ static void gc_gen_minor_drain(GcGenMinorCtx* ctx) {
 	}
 }
 
-static void gc_gen_finalize_dead_nursery(GcRuntime* rt, GcGenCopyMsState* state, size_t used_before) {
+static void gc_gen_finalize_dead_nursery(GcRuntime* rt, gc_gen_copy_ms_state* state, size_t used_before) {
 	uint8_t* cursor;
 	uint8_t* end;
 	if (rt == NULL || state == NULL || state->nursery_space == NULL) {
@@ -292,8 +292,8 @@ static void gc_gen_finalize_dead_nursery(GcRuntime* rt, GcGenCopyMsState* state,
 	}
 }
 
-static void gc_gen_mark_old(GcGenMarkCtx* ctx, GcHeader* obj) {
-	GcGenOldNode* node;
+static void gc_gen_mark_old(gc_gen_mark_ctx* ctx, GcHeader* obj) {
+	gc_gen_old_node* node;
 	if (ctx == NULL || obj == NULL) {
 		return;
 	}
@@ -306,7 +306,7 @@ static void gc_gen_mark_old(GcGenMarkCtx* ctx, GcHeader* obj) {
 }
 
 static void gc_gen_mark_root_slot(GcHeader** slot, void* ctx) {
-	GcGenMarkCtx* mark = (GcGenMarkCtx*)ctx;
+	gc_gen_mark_ctx* mark = (gc_gen_mark_ctx*)ctx;
 	if (slot == NULL) {
 		return;
 	}
@@ -314,15 +314,15 @@ static void gc_gen_mark_root_slot(GcHeader** slot, void* ctx) {
 }
 
 static void gc_gen_mark_child_slot(GcHeader** slot, void* ctx) {
-	GcGenMarkCtx* mark = (GcGenMarkCtx*)ctx;
+	gc_gen_mark_ctx* mark = (gc_gen_mark_ctx*)ctx;
 	if (slot == NULL) {
 		return;
 	}
 	gc_gen_mark_old(mark, *slot);
 }
 
-static void gc_gen_mark_handles(GcRuntime* rt, GcGenMarkCtx* ctx) {
-	GcHandle* handle;
+static void gc_gen_mark_handles(GcRuntime* rt, gc_gen_mark_ctx* ctx) {
+	gc_handle* handle;
 	if (rt == NULL || ctx == NULL) {
 		return;
 	}
@@ -331,7 +331,7 @@ static void gc_gen_mark_handles(GcRuntime* rt, GcGenMarkCtx* ctx) {
 	}
 }
 
-static void gc_gen_mark_drain(GcGenMarkCtx* ctx) {
+static void gc_gen_mark_drain(gc_gen_mark_ctx* ctx) {
 	GcHeader* obj;
 	while ((obj = gc_worklist_pop(ctx->wl)) != NULL) {
 		if (obj->desc != NULL && obj->desc->trace_slots != NULL) {
@@ -340,10 +340,10 @@ static void gc_gen_mark_drain(GcGenMarkCtx* ctx) {
 	}
 }
 
-static void gc_gen_sweep_old(GcRuntime* rt, GcGenCopyMsState* state) {
-	GcGenOldNode** link = &state->old_objects;
+static void gc_gen_sweep_old(GcRuntime* rt, gc_gen_copy_ms_state* state) {
+	gc_gen_old_node** link = &state->old_objects;
 	while (*link != NULL) {
-		GcGenOldNode* node = *link;
+		gc_gen_old_node* node = *link;
 		if (node->marked) {
 			node->marked = 0u;
 			link         = &node->next;
@@ -357,10 +357,10 @@ static void gc_gen_sweep_old(GcRuntime* rt, GcGenCopyMsState* state) {
 }
 
 static void gc_gen_collect_minor_impl(GcRuntime* rt) {
-	GcGenCopyMsState* state = gc_gen_state(rt);
-	GcWorklist        wl;
-	GcGenMinorCtx     ctx;
-	size_t            used_before;
+	gc_gen_copy_ms_state* state = gc_gen_state(rt);
+	gc_worklist           wl;
+	gc_gen_minor_ctx      ctx;
+	size_t                used_before;
 	if (rt == NULL || state == NULL || state->nursery_space == NULL) {
 		return;
 	}
@@ -390,9 +390,9 @@ static void gc_gen_collect_minor_impl(GcRuntime* rt) {
 }
 
 static void gc_gen_collect_full_impl(GcRuntime* rt) {
-	GcGenCopyMsState* state = gc_gen_state(rt);
-	GcWorklist        wl;
-	GcGenMarkCtx      ctx;
+	gc_gen_copy_ms_state* state = gc_gen_state(rt);
+	gc_worklist           wl;
+	gc_gen_mark_ctx       ctx;
 	if (rt == NULL || state == NULL) {
 		return;
 	}
@@ -414,13 +414,13 @@ static void gc_gen_collect_full_impl(GcRuntime* rt) {
 }
 
 static void gc_gen_global_init(GcRuntime* rt, const GcConfig* cfg) {
-	GcGenCopyMsState* state;
-	size_t            nursery_size =
+	gc_gen_copy_ms_state* state;
+	size_t                nursery_size =
         (cfg != NULL && cfg->gc_young_space_size != 0u) ? cfg->gc_young_space_size : (4u * 1024u * 1024u);
 	if (rt == NULL) {
 		return;
 	}
-	state = (GcGenCopyMsState*)calloc(1, sizeof(*state));
+	state = (gc_gen_copy_ms_state*)calloc(1, sizeof(*state));
 	if (state == NULL) {
 		return;
 	}
@@ -435,9 +435,9 @@ static void gc_gen_global_init(GcRuntime* rt, const GcConfig* cfg) {
 }
 
 static void gc_gen_global_destroy(GcRuntime* rt) {
-	GcGenCopyMsState* state = gc_gen_state(rt);
-	GcGenOldNode*     node;
-	GcGenOldNode*     next;
+	gc_gen_copy_ms_state* state = gc_gen_state(rt);
+	gc_gen_old_node*      node;
+	gc_gen_old_node*      next;
 	if (state == NULL) {
 		return;
 	}
@@ -466,9 +466,9 @@ static void gc_gen_thread_destroy(GcRuntime* rt, GcThreadContext* thread) {
 
 static void* gc_gen_alloc(GcRuntime* rt, GcThreadContext* thread, const GcDescriptor* desc, size_t size,
                           uint32_t alloc_flags) {
-	GcGenCopyMsState* state = gc_gen_state(rt);
-	GcHeader*         obj;
-	size_t            aligned_size;
+	gc_gen_copy_ms_state* state = gc_gen_state(rt);
+	GcHeader*             obj;
+	size_t                aligned_size;
 	(void)thread;
 	if (rt == NULL || state == NULL || desc == NULL || size < sizeof(GcHeader)) {
 		return NULL;
@@ -522,7 +522,7 @@ static void gc_gen_post_alloc(GcRuntime* rt, GcHeader* obj) {
 
 static void gc_gen_write_barrier(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHeader** slot,
                                  GcHeader* old_value, GcHeader* new_value) {
-	GcGenCopyMsState* state;
+	gc_gen_copy_ms_state* state;
 	(void)thread;
 	(void)old_value;
 	if (rt == NULL || owner == NULL || slot == NULL || new_value == NULL) {

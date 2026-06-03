@@ -30,7 +30,8 @@ static void test_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx)
 	}
 }
 
-static void test_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
+static void test_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot,
+                                   void* ctx) {
 	TestNode* node = (TestNode*)obj;
 	size_t    left_offset;
 	size_t    right_offset;
@@ -76,14 +77,14 @@ static void test_scan_roots(void* vm_ctx, GcVisitSlotFn visit_root_slot, void* c
 }
 
 static const GcDescriptor TEST_NODE_DESC = {
-	.name        = "GenNode",
-	.fixed_size  = sizeof(TestNode),
-	.flags       = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
-	.kind        = 2,
-	.trace_slots = test_trace_slots,
+	.name              = "GenNode",
+	.fixed_size        = sizeof(TestNode),
+	.flags             = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
+	.kind              = 2,
+	.trace_slots       = test_trace_slots,
 	.trace_slots_range = test_trace_slots_range,
-	.trace_edges = test_trace_edges,
-	.finalize    = counted_finalize,
+	.trace_edges       = test_trace_edges,
+	.finalize          = counted_finalize,
 };
 
 static TestNode* make_node(GcRuntime* rt, GcThreadContext* thread, int id) {

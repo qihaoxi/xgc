@@ -2,7 +2,7 @@
 
 static const size_t GC_DEFAULT_CARD_GRANULARITY = 256u;
 
-static const GcCardEntry* gc_card_table_find_entry_const(const GcCardTable* table, const GcHeader* owner) {
+static const gc_card_entry* gc_card_table_find_entry_const(const gc_card_table* table, const gc_header* owner) {
 	size_t    i;
 	uintptr_t owner_base;
 
@@ -12,7 +12,7 @@ static const GcCardEntry* gc_card_table_find_entry_const(const GcCardTable* tabl
 
 	owner_base = (uintptr_t)owner;
 	for (i = 0; i < table->count; ++i) {
-		const GcCardEntry* entry = &table->entries[i];
+		const gc_card_entry* entry = &table->entries[i];
 		if (entry->owner_base == owner_base) {
 			return entry;
 		}
@@ -21,11 +21,11 @@ static const GcCardEntry* gc_card_table_find_entry_const(const GcCardTable* tabl
 	return NULL;
 }
 
-static GcCardEntry* gc_card_table_find_entry(GcCardTable* table, const GcHeader* owner) {
-	return (GcCardEntry*)gc_card_table_find_entry_const(table, owner);
+static gc_card_entry* gc_card_table_find_entry(gc_card_table* table, const gc_header* owner) {
+	return (gc_card_entry*)gc_card_table_find_entry_const(table, owner);
 }
 
-static size_t gc_card_table_effective_granularity(const GcCardTable* table) {
+static size_t gc_card_table_effective_granularity(const gc_card_table* table) {
 	if (table == NULL || table->card_granularity == 0u) {
 		return GC_DEFAULT_CARD_GRANULARITY;
 	}
@@ -33,7 +33,7 @@ static size_t gc_card_table_effective_granularity(const GcCardTable* table) {
 	return table->card_granularity;
 }
 
-static size_t gc_card_table_card_index_for_slot(const GcCardTable* table, const GcCardEntry* entry,
+static size_t gc_card_table_card_index_for_slot(const gc_card_table* table, const gc_card_entry* entry,
                                                 const void* slot_addr) {
 	size_t slot_offset;
 	size_t card_index;
@@ -57,7 +57,7 @@ static size_t gc_card_table_card_index_for_slot(const GcCardTable* table, const 
 	return card_index;
 }
 
-static void gc_card_table_account_dirty_card(GcRuntime* rt, GcCardEntry* entry) {
+static void gc_card_table_account_dirty_card(gc_runtime* rt, gc_card_entry* entry) {
 	if (entry == NULL) {
 		return;
 	}
@@ -72,7 +72,7 @@ static void gc_card_table_account_dirty_card(GcRuntime* rt, GcCardEntry* entry) 
 	}
 }
 
-static void gc_card_table_unaccount_dirty_owner(GcRuntime* rt, size_t dirty_card_count) {
+static void gc_card_table_unaccount_dirty_owner(gc_runtime* rt, size_t dirty_card_count) {
 	if (rt == NULL || dirty_card_count == 0u) {
 		return;
 	}
@@ -89,11 +89,11 @@ static void gc_card_table_unaccount_dirty_owner(GcRuntime* rt, size_t dirty_card
 }
 
 typedef struct {
-	GcHeader* owner;
-	size_t    card_index;
+	gc_header* owner;
+	size_t     card_index;
 } GcDirtyCardSnapshot;
 
-void gc_card_table_init(GcCardTable* table, size_t card_granularity) {
+void gc_card_table_init(gc_card_table* table, size_t card_granularity) {
 	if (table == NULL) {
 		return;
 	}
@@ -102,7 +102,7 @@ void gc_card_table_init(GcCardTable* table, size_t card_granularity) {
 	table->card_granularity = (card_granularity != 0u) ? card_granularity : GC_DEFAULT_CARD_GRANULARITY;
 }
 
-void gc_card_table_destroy(GcCardTable* table) {
+void gc_card_table_destroy(gc_card_table* table) {
 	size_t i;
 
 	if (table == NULL) {
@@ -117,12 +117,12 @@ void gc_card_table_destroy(GcCardTable* table) {
 	memset(table, 0, sizeof(*table));
 }
 
-int gc_card_table_register_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner, size_t owner_size) {
-	GcCardEntry* new_entries;
-	GcCardEntry* entry;
-	size_t       card_count;
-	size_t       granularity;
-	size_t       new_capacity;
+int gc_card_table_register_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner, size_t owner_size) {
+	gc_card_entry* new_entries;
+	gc_card_entry* entry;
+	size_t         card_count;
+	size_t         granularity;
+	size_t         new_capacity;
 
 	(void)rt;
 	if (table == NULL || owner == NULL || owner_size == 0u) {
@@ -135,7 +135,7 @@ int gc_card_table_register_owner(GcRuntime* rt, GcCardTable* table, const GcHead
 
 	if (table->count == table->capacity) {
 		new_capacity = (table->capacity > 0u) ? (table->capacity * 2u) : 32u;
-		new_entries  = (GcCardEntry*)realloc(table->entries, new_capacity * sizeof(GcCardEntry));
+		new_entries  = (gc_card_entry*)realloc(table->entries, new_capacity * sizeof(gc_card_entry));
 		if (new_entries == NULL) {
 			return 0;
 		}
@@ -164,7 +164,7 @@ int gc_card_table_register_owner(GcRuntime* rt, GcCardTable* table, const GcHead
 	return 1;
 }
 
-void gc_card_table_unregister_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner) {
+void gc_card_table_unregister_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner) {
 	size_t i;
 
 	if (table == NULL || owner == NULL) {
@@ -172,7 +172,7 @@ void gc_card_table_unregister_owner(GcRuntime* rt, GcCardTable* table, const GcH
 	}
 
 	for (i = 0; i < table->count; ++i) {
-		GcCardEntry* entry = &table->entries[i];
+		gc_card_entry* entry = &table->entries[i];
 		if (entry->owner_base != (uintptr_t)owner) {
 			continue;
 		}
@@ -185,9 +185,9 @@ void gc_card_table_unregister_owner(GcRuntime* rt, GcCardTable* table, const GcH
 	}
 }
 
-void gc_card_table_mark_slot(GcRuntime* rt, GcCardTable* table, const GcHeader* owner, const void* slot_addr) {
-	GcCardEntry* entry;
-	size_t       card_index;
+void gc_card_table_mark_slot(gc_runtime* rt, gc_card_table* table, const gc_header* owner, const void* slot_addr) {
+	gc_card_entry* entry;
+	size_t         card_index;
 
 	if (table == NULL || owner == NULL || slot_addr == NULL) {
 		return;
@@ -207,9 +207,9 @@ void gc_card_table_mark_slot(GcRuntime* rt, GcCardTable* table, const GcHeader* 
 	gc_card_table_account_dirty_card(rt, entry);
 }
 
-void gc_card_table_mark_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner) {
-	GcCardEntry* entry;
-	size_t       i;
+void gc_card_table_mark_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner) {
+	gc_card_entry* entry;
+	size_t         i;
 
 	if (table == NULL || owner == NULL) {
 		return;
@@ -230,13 +230,13 @@ void gc_card_table_mark_owner(GcRuntime* rt, GcCardTable* table, const GcHeader*
 	}
 }
 
-int gc_card_table_owner_is_dirty(const GcCardTable* table, const GcHeader* owner) {
-	const GcCardEntry* entry = gc_card_table_find_entry_const(table, owner);
+int gc_card_table_owner_is_dirty(const gc_card_table* table, const gc_header* owner) {
+	const gc_card_entry* entry = gc_card_table_find_entry_const(table, owner);
 	return (entry != NULL) ? (entry->dirty_card_count != 0u) : 0;
 }
 
-void gc_card_table_clear_owner(GcRuntime* rt, GcCardTable* table, const GcHeader* owner) {
-	GcCardEntry* entry;
+void gc_card_table_clear_owner(gc_runtime* rt, gc_card_table* table, const gc_header* owner) {
+	gc_card_entry* entry;
 
 	if (table == NULL || owner == NULL) {
 		return;
@@ -252,7 +252,7 @@ void gc_card_table_clear_owner(GcRuntime* rt, GcCardTable* table, const GcHeader
 	entry->dirty_card_count = 0u;
 }
 
-void gc_card_table_visit_dirty(const GcCardTable* table, GcVisitDirtyCardFn visit, void* ctx) {
+void gc_card_table_visit_dirty(const gc_card_table* table, GcVisitDirtyCardFn visit, void* ctx) {
 	GcDirtyCardSnapshot* snapshot;
 	size_t               dirty_count;
 	size_t               snapshot_index;
@@ -264,8 +264,8 @@ void gc_card_table_visit_dirty(const GcCardTable* table, GcVisitDirtyCardFn visi
 
 	dirty_count = 0u;
 	for (i = 0; i < table->count; ++i) {
-		const GcCardEntry* entry = &table->entries[i];
-		size_t             card_index;
+		const gc_card_entry* entry = &table->entries[i];
+		size_t               card_index;
 
 		if (entry->dirty_card_count == 0u) {
 			continue;
@@ -289,8 +289,8 @@ void gc_card_table_visit_dirty(const GcCardTable* table, GcVisitDirtyCardFn visi
 
 	snapshot_index = 0u;
 	for (i = 0; i < table->count; ++i) {
-		const GcCardEntry* entry = &table->entries[i];
-		size_t             card_index;
+		const gc_card_entry* entry = &table->entries[i];
+		size_t               card_index;
 
 		if (entry->dirty_card_count == 0u) {
 			continue;
@@ -301,7 +301,7 @@ void gc_card_table_visit_dirty(const GcCardTable* table, GcVisitDirtyCardFn visi
 				continue;
 			}
 
-			snapshot[snapshot_index].owner      = (GcHeader*)entry->owner_base;
+			snapshot[snapshot_index].owner      = (gc_header*)entry->owner_base;
 			snapshot[snapshot_index].card_index = card_index;
 			snapshot_index++;
 		}

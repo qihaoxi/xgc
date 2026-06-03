@@ -15,6 +15,7 @@ endfunction()
 
 add_xgc_test(test_barrier_substrate ${XGC_PROJECT_ROOT}/tests/test_barrier_substrate.c)
 add_xgc_test(test_card_table_substrate ${XGC_PROJECT_ROOT}/tests/test_card_table_substrate.c)
+add_xgc_test(test_bitmap_substrate ${XGC_PROJECT_ROOT}/tests/test_bitmap_substrate.c)
 add_xgc_test(test_heap_substrate ${XGC_PROJECT_ROOT}/tests/test_heap_substrate.c)
 
 if (GC_ALGORITHM STREQUAL "marksweep")

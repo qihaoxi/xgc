@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const GcDescriptor TEST_DESC = {
+static const gc_descriptor TEST_DESC = {
 	.name        = "CardTableTestObject",
-	.fixed_size  = sizeof(GcHeader),
+	.fixed_size  = sizeof(gc_header),
 	.flags       = 0u,
 	.kind        = 100u,
 	.trace_slots = NULL,
@@ -15,12 +15,12 @@ static const GcDescriptor TEST_DESC = {
 };
 
 typedef struct {
-	GcHeader* owners[8];
-	size_t    card_indices[8];
-	size_t    count;
+	gc_header* owners[8];
+	size_t     card_indices[8];
+	size_t     count;
 } DirtyCardCapture;
 
-static void capture_dirty_card(GcHeader* owner, size_t card_index, void* ctx) {
+static void capture_dirty_card(gc_header* owner, size_t card_index, void* ctx) {
 	DirtyCardCapture* capture = (DirtyCardCapture*)ctx;
 	assert(capture != NULL);
 	assert(capture->count < (sizeof(capture->owners) / sizeof(capture->owners[0])));
@@ -30,11 +30,11 @@ static void capture_dirty_card(GcHeader* owner, size_t card_index, void* ctx) {
 }
 
 int main(void) {
-	GcConfig         cfg;
-	GcVmHooks        hooks;
-	GcRuntime*       rt;
-	GcHeader*        owner_a;
-	GcHeader*        owner_b;
+	gc_config        cfg;
+	gc_vm_hooks      hooks;
+	gc_runtime*      rt;
+	gc_header*       owner_a;
+	gc_header*       owner_b;
 	DirtyCardCapture capture;
 	const size_t     owner_a_size = 96u;
 	const size_t     owner_b_size = 48u;
@@ -50,8 +50,8 @@ int main(void) {
 	assert(rt->barriers.dirty_old_objects == 0u);
 	assert(rt->barriers.dirty_cards == 0u);
 
-	owner_a = (GcHeader*)calloc(1, owner_a_size);
-	owner_b = (GcHeader*)calloc(1, owner_b_size);
+	owner_a = (gc_header*)calloc(1, owner_a_size);
+	owner_b = (gc_header*)calloc(1, owner_b_size);
 	assert(owner_a != NULL);
 	assert(owner_b != NULL);
 	owner_a->desc = &TEST_DESC;

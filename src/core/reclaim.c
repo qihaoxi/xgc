@@ -1,6 +1,6 @@
 #include "gc_internal.h"
 
-void gc_reclaim_object(GcRuntime* rt, GcHeader* obj) {
+void gc_reclaim_object(gc_runtime* rt, gc_header* obj) {
 	if (obj == NULL) {
 		return;
 	}

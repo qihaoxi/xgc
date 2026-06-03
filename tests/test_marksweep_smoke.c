@@ -4,66 +4,66 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-typedef struct TestNode {
-	GcHeader         gc;
-	struct TestNode* left;
-	struct TestNode* right;
-	int              id;
-} TestNode;
+typedef struct test_node {
+	gc_header         gc;
+	struct test_node* left;
+	struct test_node* right;
+	int               id;
+} test_node;
 
 typedef struct {
-	TestNode* roots[8];
-	int       root_count;
-	int       finalized_count;
-} TestVm;
+	test_node* roots[8];
+	int        root_count;
+	int        finalized_count;
+} test_vm;
 
-static TestVm* g_test_vm;
+static test_vm* g_test_vm;
 
-static void test_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx) {
-	TestNode* node = (TestNode*)obj;
+static void test_trace_slots(gc_header* obj, gc_visit_slot_fn visit_slot, void* ctx) {
+	test_node* node = (test_node*)obj;
 	if (node->left != NULL) {
-		visit_slot((GcHeader**)&node->left, ctx);
+		visit_slot((gc_header**)&node->left, ctx);
 	}
 	if (node->right != NULL) {
-		visit_slot((GcHeader**)&node->right, ctx);
+		visit_slot((gc_header**)&node->right, ctx);
 	}
 }
 
-static void test_trace_edges(GcHeader* obj, GcVisitObjectFn visit_obj, void* ctx) {
-	TestNode* node = (TestNode*)obj;
+static void test_trace_edges(gc_header* obj, GcVisitObjectFn visit_obj, void* ctx) {
+	test_node* node = (test_node*)obj;
 	if (node->left != NULL) {
-		visit_obj((GcHeader*)node->left, ctx);
+		visit_obj((gc_header*)node->left, ctx);
 	}
 	if (node->right != NULL) {
-		visit_obj((GcHeader*)node->right, ctx);
+		visit_obj((gc_header*)node->right, ctx);
 	}
 }
 
-static void test_finalize(GcHeader* obj) {
-	TestNode* node = (TestNode*)obj;
+static void test_finalize(gc_header* obj) {
+	test_node* node = (test_node*)obj;
 	(void)node;
 }
 
-static void test_scan_roots(void* vm_ctx, GcVisitSlotFn visit_root_slot, void* ctx) {
-	TestVm* vm = (TestVm*)vm_ctx;
-	int     i;
+static void test_scan_roots(void* vm_ctx, gc_visit_slot_fn visit_root_slot, void* ctx) {
+	test_vm* vm = (test_vm*)vm_ctx;
+	int      i;
 
 	for (i = 0; i < vm->root_count; ++i) {
-		visit_root_slot((GcHeader**)&vm->roots[i], ctx);
+		visit_root_slot((gc_header**)&vm->roots[i], ctx);
 	}
 }
 
-static void counted_finalize(GcHeader* obj) {
-	TestNode* node = (TestNode*)obj;
+static void counted_finalize(gc_header* obj) {
+	test_node* node = (test_node*)obj;
 	(void)node;
 	if (g_test_vm != NULL) {
 		g_test_vm->finalized_count++;
 	}
 }
 
-static const GcDescriptor TEST_NODE_DESC = {
-	.name        = "TestNode",
-	.fixed_size  = sizeof(TestNode),
+static const gc_descriptor TEST_NODE_DESC = {
+	.name        = "test_node",
+	.fixed_size  = sizeof(test_node),
 	.flags       = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
 	.kind        = 1,
 	.trace_slots = test_trace_slots,
@@ -71,8 +71,8 @@ static const GcDescriptor TEST_NODE_DESC = {
 	.finalize    = counted_finalize,
 };
 
-static TestNode* make_node(GcRuntime* rt, GcThreadContext* thread, TestVm* vm, int id) {
-	TestNode* node = (TestNode*)gc_alloc_typed(rt, thread, &TEST_NODE_DESC, sizeof(TestNode), GC_ALLOC_DEFAULT);
+static test_node* make_node(gc_runtime* rt, gc_thread_context* thread, test_vm* vm, int id) {
+	test_node* node = (test_node*)gc_alloc_typed(rt, thread, &TEST_NODE_DESC, sizeof(test_node), GC_ALLOC_DEFAULT);
 	assert(node != NULL);
 	node->left  = NULL;
 	node->right = NULL;
@@ -82,40 +82,37 @@ static TestNode* make_node(GcRuntime* rt, GcThreadContext* thread, TestVm* vm, i
 }
 
 int main(void) {
-	GcConfig         cfg;
-	GcVmHooks        hooks;
-	GcRuntime*       rt;
-	GcThreadContext* thread;
-	GcHandle*        handle;
-	TestVm           vm = { 0 };
-	TestNode*        a;
-	TestNode*        b;
-	TestNode*        c;
-	TestNode*        x;
-	TestNode*        y;
+	gc_config          cfg;
+	gc_vm_hooks        hooks;
+	test_vm            vm = { 0 };
+	test_node*         a;
+	test_node*         b;
+	test_node*         c;
+	test_node*         x;
+	test_node*         y;
 
 	gc_config_init_default(&cfg);
 	g_test_vm        = &vm;
 	hooks.scan_roots = test_scan_roots;
 	hooks.vm_ctx     = &vm;
 
-	rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
+	gc_runtime* rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
 	assert(rt != NULL);
-	thread = gc_thread_attach(rt, &vm);
+	gc_thread_context* thread = gc_thread_attach(rt, &vm);
 	assert(thread != NULL);
 
 	a = make_node(rt, thread, &vm, 1);
 	b = make_node(rt, thread, &vm, 2);
 	c = make_node(rt, thread, &vm, 3);
 
-	gc_store_ref(rt, thread, (GcHeader*)a, (GcHeader**)&a->left, (GcHeader*)b);
-	gc_store_ref(rt, thread, (GcHeader*)b, (GcHeader**)&b->left, (GcHeader*)c);
+	gc_store_ref(rt, thread, (gc_header*)a, (gc_header**)&a->left, (gc_header*)b);
+	gc_store_ref(rt, thread, (gc_header*)b, (gc_header**)&b->left, (gc_header*)c);
 	vm.roots[0]   = a;
 	vm.root_count = 1;
 
-	handle = gc_handle_acquire(rt, (GcHeader*)c, GC_HANDLE_PINNED);
+	gc_handle* handle = gc_handle_acquire(rt, (gc_header*)c, GC_HANDLE_PINNED);
 	assert(handle != NULL);
-	assert(gc_handle_get(handle) == (GcHeader*)c);
+	assert(gc_handle_get(handle) == (gc_header*)c);
 
 	gc_collect_full(rt);
 	assert(vm.finalized_count == 0);
@@ -123,7 +120,7 @@ int main(void) {
 	vm.roots[0] = NULL;
 	gc_collect_full(rt);
 	assert(vm.finalized_count == 2);
-	assert(gc_handle_get(handle) == (GcHeader*)c);
+	assert(gc_handle_get(handle) == (gc_header*)c);
 
 	gc_handle_release(handle);
 	handle = NULL;
@@ -132,8 +129,8 @@ int main(void) {
 
 	x = make_node(rt, thread, &vm, 4);
 	y = make_node(rt, thread, &vm, 5);
-	gc_store_ref(rt, thread, (GcHeader*)x, (GcHeader**)&x->left, (GcHeader*)y);
-	gc_store_ref(rt, thread, (GcHeader*)y, (GcHeader**)&y->left, (GcHeader*)x);
+	gc_store_ref(rt, thread, (gc_header*)x, (gc_header**)&x->left, (gc_header*)y);
+	gc_store_ref(rt, thread, (gc_header*)y, (gc_header**)&y->left, (gc_header*)x);
 	gc_collect_full(rt);
 	assert(vm.finalized_count == 5);
 

@@ -1,11 +1,11 @@
 #include "gc_internal.h"
 
-static void gc_noop_visit_root_slot(GcHeader** slot, void* ctx) {
+static void gc_noop_visit_root_slot(gc_header** slot, void* ctx) {
 	(void)slot;
 	(void)ctx;
 }
 
-void gc_runtime_apply_default_config(GcConfig* cfg) {
+void gc_runtime_apply_default_config(gc_config* cfg) {
 	if (cfg == NULL) {
 		return;
 	}
@@ -27,7 +27,7 @@ void gc_runtime_apply_default_config(GcConfig* cfg) {
 	}
 }
 
-void gc_config_init_default(GcConfig* cfg) {
+void gc_config_init_default(gc_config* cfg) {
 	if (cfg == NULL) {
 		return;
 	}
@@ -36,8 +36,8 @@ void gc_config_init_default(GcConfig* cfg) {
 	gc_runtime_apply_default_config(cfg);
 }
 
-GcRuntime* gc_runtime_create(const GcConfig* cfg, const GcAlgorithmVTable* algo, const GcVmHooks* hooks) {
-	GcRuntime* rt = (GcRuntime*)calloc(1, sizeof(*rt));
+gc_runtime* gc_runtime_create(const gc_config* cfg, const gc_algorithm_vtable* algo, const gc_vm_hooks* hooks) {
+	gc_runtime* rt = (gc_runtime*)calloc(1, sizeof(*rt));
 	if (rt == NULL) {
 		return NULL;
 	}
@@ -54,7 +54,7 @@ GcRuntime* gc_runtime_create(const GcConfig* cfg, const GcAlgorithmVTable* algo,
 	rt->algo = (algo != NULL) ? algo : xgc_default_algorithm();
 	gc_heap_init(&rt->heap, rt->cfg.gc_large_object_threshold);
 	rt->worklist_capacity = 256;
-	rt->worklist_data     = (GcHeader**)calloc((size_t)rt->worklist_capacity, sizeof(GcHeader*));
+	rt->worklist_data     = (gc_header**)calloc((size_t)rt->worklist_capacity, sizeof(gc_header*));
 	if (rt->worklist_data == NULL) {
 		free(rt);
 		return NULL;
@@ -71,9 +71,9 @@ GcRuntime* gc_runtime_create(const GcConfig* cfg, const GcAlgorithmVTable* algo,
 	return rt;
 }
 
-void gc_runtime_destroy(GcRuntime* rt) {
-	GcHandle* handle;
-	GcHandle* next;
+void gc_runtime_destroy(gc_runtime* rt) {
+	gc_handle* handle;
+	gc_handle* next;
 
 	if (rt == NULL) {
 		return;
@@ -95,14 +95,14 @@ void gc_runtime_destroy(GcRuntime* rt) {
 	free(rt);
 }
 
-GcThreadContext* gc_thread_attach(GcRuntime* rt, void* vm_thread_ctx) {
-	GcThreadContext* thread;
+gc_thread_context* gc_thread_attach(gc_runtime* rt, void* vm_thread_ctx) {
+	gc_thread_context* thread;
 
 	if (rt == NULL) {
 		return NULL;
 	}
 
-	thread = (GcThreadContext*)calloc(1, sizeof(*thread));
+	thread = (gc_thread_context*)calloc(1, sizeof(*thread));
 	if (thread == NULL) {
 		return NULL;
 	}
@@ -117,8 +117,8 @@ GcThreadContext* gc_thread_attach(GcRuntime* rt, void* vm_thread_ctx) {
 	return thread;
 }
 
-void gc_thread_detach(GcThreadContext* thread) {
-	GcRuntime* rt;
+void gc_thread_detach(gc_thread_context* thread) {
+	gc_runtime* rt;
 
 	if (thread == NULL) {
 		return;
@@ -132,19 +132,19 @@ void gc_thread_detach(GcThreadContext* thread) {
 	free(thread);
 }
 
-void* gc_alloc_typed(GcRuntime* rt, GcThreadContext* thread, const GcDescriptor* desc, size_t size,
+void* gc_alloc_typed(gc_runtime* rt, gc_thread_context* thread, const gc_descriptor* desc, size_t size,
                      uint32_t alloc_flags) {
-	GcHeader* obj = NULL;
+	gc_header* obj = NULL;
 
-	if (rt == NULL || desc == NULL || size < sizeof(GcHeader)) {
+	if (rt == NULL || desc == NULL || size < sizeof(gc_header)) {
 		return NULL;
 	}
 
 	if (rt->algo != NULL && rt->algo->alloc != NULL) {
-		obj = (GcHeader*)rt->algo->alloc(rt, thread, desc, size, alloc_flags);
+		obj = (gc_header*)rt->algo->alloc(rt, thread, desc, size, alloc_flags);
 	}
 	if (obj == NULL) {
-		obj = (GcHeader*)calloc(1, size);
+		obj = (gc_header*)calloc(1, size);
 	}
 	if (obj == NULL) {
 		return NULL;
@@ -170,8 +170,8 @@ void* gc_alloc_typed(GcRuntime* rt, GcThreadContext* thread, const GcDescriptor*
 	return obj;
 }
 
-void gc_store_ref(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHeader** slot, GcHeader* new_value) {
-	GcHeader* old_value;
+void gc_store_ref(gc_runtime* rt, gc_thread_context* thread, gc_header* owner, gc_header** slot, gc_header* new_value) {
+	gc_header* old_value;
 
 	if (slot == NULL) {
 		return;
@@ -185,7 +185,7 @@ void gc_store_ref(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHea
 	}
 }
 
-GcHeader* gc_load_ref(GcRuntime* rt, GcThreadContext* thread, GcHeader** slot) {
+gc_header* gc_load_ref(gc_runtime* rt, gc_thread_context* thread, gc_header** slot) {
 	if (slot == NULL) {
 		return NULL;
 	}
@@ -195,7 +195,7 @@ GcHeader* gc_load_ref(GcRuntime* rt, GcThreadContext* thread, GcHeader** slot) {
 	return *slot;
 }
 
-void gc_collect_minor(GcRuntime* rt) {
+void gc_collect_minor(gc_runtime* rt) {
 	if (rt == NULL) {
 		return;
 	}
@@ -205,7 +205,7 @@ void gc_collect_minor(GcRuntime* rt) {
 	rt->stats.minor_collections++;
 }
 
-void gc_collect_major(GcRuntime* rt) {
+void gc_collect_major(gc_runtime* rt) {
 	if (rt == NULL) {
 		return;
 	}
@@ -217,7 +217,7 @@ void gc_collect_major(GcRuntime* rt) {
 	rt->stats.major_collections++;
 }
 
-void gc_collect_full(GcRuntime* rt) {
+void gc_collect_full(gc_runtime* rt) {
 	if (rt == NULL) {
 		return;
 	}
@@ -229,14 +229,14 @@ void gc_collect_full(GcRuntime* rt) {
 	rt->stats.full_collections++;
 }
 
-GcHandle* gc_handle_acquire(GcRuntime* rt, GcHeader* obj, uint32_t flags) {
-	GcHandle* handle;
+gc_handle* gc_handle_acquire(gc_runtime* rt, gc_header* obj, uint32_t flags) {
+	gc_handle* handle;
 
 	if (rt == NULL || obj == NULL) {
 		return NULL;
 	}
 
-	handle = (GcHandle*)calloc(1, sizeof(*handle));
+	handle = (gc_handle*)calloc(1, sizeof(*handle));
 	if (handle == NULL) {
 		return NULL;
 	}
@@ -254,13 +254,13 @@ GcHandle* gc_handle_acquire(GcRuntime* rt, GcHeader* obj, uint32_t flags) {
 	return handle;
 }
 
-GcHeader* gc_handle_get(const GcHandle* handle) {
+gc_header* gc_handle_get(const gc_handle* handle) {
 	return (handle != NULL) ? handle->target : NULL;
 }
 
-void gc_handle_release(GcHandle* handle) {
-	GcHandle** link;
-	GcRuntime* rt;
+void gc_handle_release(gc_handle* handle) {
+	gc_handle** link;
+	gc_runtime* rt;
 
 	if (handle == NULL) {
 		return;

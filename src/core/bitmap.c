@@ -1,6 +1,6 @@
 #include "gc_internal.h"
 
-void gc_bitmap_init(GcBitmap* bitmap, size_t bit_count) {
+void gc_bitmap_init(gc_bitmap* bitmap, size_t bit_count) {
 	if (bitmap == NULL) {
 		return;
 	}
@@ -11,7 +11,7 @@ void gc_bitmap_init(GcBitmap* bitmap, size_t bit_count) {
 	}
 }
 
-void gc_bitmap_destroy(GcBitmap* bitmap) {
+void gc_bitmap_destroy(gc_bitmap* bitmap) {
 	if (bitmap == NULL) {
 		return;
 	}
@@ -20,7 +20,7 @@ void gc_bitmap_destroy(GcBitmap* bitmap) {
 	memset(bitmap, 0, sizeof(*bitmap));
 }
 
-int gc_bitmap_resize(GcBitmap* bitmap, size_t bit_count) {
+int gc_bitmap_resize(gc_bitmap* bitmap, size_t bit_count) {
 	size_t   byte_count;
 	uint8_t* new_bits;
 
@@ -52,7 +52,7 @@ int gc_bitmap_resize(GcBitmap* bitmap, size_t bit_count) {
 	return 1;
 }
 
-void gc_bitmap_clear_all(GcBitmap* bitmap) {
+void gc_bitmap_clear_all(gc_bitmap* bitmap) {
 	if (bitmap == NULL || bitmap->bits == NULL) {
 		return;
 	}
@@ -60,7 +60,7 @@ void gc_bitmap_clear_all(GcBitmap* bitmap) {
 	memset(bitmap->bits, 0, bitmap->byte_count);
 }
 
-void gc_bitmap_set(GcBitmap* bitmap, size_t index) {
+void gc_bitmap_set(gc_bitmap* bitmap, size_t index) {
 	if (bitmap == NULL || bitmap->bits == NULL || index >= bitmap->bit_count) {
 		return;
 	}
@@ -68,7 +68,7 @@ void gc_bitmap_set(GcBitmap* bitmap, size_t index) {
 	bitmap->bits[index / 8u] = (uint8_t)(bitmap->bits[index / 8u] | (uint8_t)(1u << (index % 8u)));
 }
 
-void gc_bitmap_clear(GcBitmap* bitmap, size_t index) {
+void gc_bitmap_clear(gc_bitmap* bitmap, size_t index) {
 	if (bitmap == NULL || bitmap->bits == NULL || index >= bitmap->bit_count) {
 		return;
 	}
@@ -76,7 +76,7 @@ void gc_bitmap_clear(GcBitmap* bitmap, size_t index) {
 	bitmap->bits[index / 8u] = (uint8_t)(bitmap->bits[index / 8u] & (uint8_t)~(1u << (index % 8u)));
 }
 
-int gc_bitmap_test(const GcBitmap* bitmap, size_t index) {
+int gc_bitmap_test(const gc_bitmap* bitmap, size_t index) {
 	if (bitmap == NULL || bitmap->bits == NULL || index >= bitmap->bit_count) {
 		return 0;
 	}

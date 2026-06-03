@@ -4,11 +4,11 @@
 #include <stdlib.h>
 
 int main(void) {
-	GcHeap     heap;
-	GcConfig   cfg;
-	GcVmHooks  hooks;
-	GcRuntime* rt;
-	uint8_t*   young;
+	gc_heap     heap;
+	gc_config   cfg;
+	gc_vm_hooks hooks;
+	gc_runtime* rt;
+	uint8_t*    young;
 
 	gc_heap_init(&heap, 4096u);
 	assert(heap.large_object_threshold == 4096u);

@@ -10,16 +10,16 @@
 #define BENCH_SLOT_COUNT 4096u
 
 typedef struct {
-	GcHeader  header;
-	GcHeader* slots[BENCH_SLOT_COUNT];
+	gc_header  header;
+	gc_header* slots[BENCH_SLOT_COUNT];
 } BenchOwner;
 
 typedef struct {
-	GcHeader header;
+	gc_header header;
 	uint64_t payload[2];
 } BenchLeaf;
 
-static void bench_owner_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx) {
+static void bench_owner_trace_slots(gc_header* obj, gc_visit_slot_fn visit_slot, void* ctx) {
 	BenchOwner* owner;
 	size_t      i;
 
@@ -33,7 +33,7 @@ static void bench_owner_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, voi
 	}
 }
 
-static void bench_owner_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
+static void bench_owner_trace_slots_range(gc_header* obj, size_t byte_begin, size_t byte_end, gc_visit_slot_fn visit_slot, void* ctx) {
 	BenchOwner* owner;
 	size_t      slots_begin;
 	size_t      slots_end;
@@ -90,7 +90,7 @@ static size_t parse_size_arg(const char* arg, size_t fallback) {
 	return (size_t)v;
 }
 
-static const GcDescriptor BENCH_OWNER_DESC = {
+static const gc_descriptor BENCH_OWNER_DESC = {
 	.name        = "BenchOwner",
 	.fixed_size  = sizeof(BenchOwner),
 	.flags       = GC_DESC_FLAG_CONTAINS_REFS,
@@ -101,7 +101,7 @@ static const GcDescriptor BENCH_OWNER_DESC = {
 	.finalize    = NULL,
 };
 
-static const GcDescriptor BENCH_LEAF_DESC = {
+static const gc_descriptor BENCH_LEAF_DESC = {
 	.name        = "BenchLeaf",
 	.fixed_size  = sizeof(BenchLeaf),
 	.flags       = 0u,
@@ -112,13 +112,13 @@ static const GcDescriptor BENCH_LEAF_DESC = {
 };
 
 int main(int argc, char** argv) {
-	GcConfig                  cfg;
-	GcVmHooks                 hooks;
-	GcRuntime*                rt;
-	GcThreadContext*          thread;
-	GcHandle*                 owner_handle;
+	gc_config                  cfg;
+	gc_vm_hooks                 hooks;
+	gc_runtime*                rt;
+	gc_thread_context*          thread;
+	gc_handle*                 owner_handle;
 	BenchOwner*               owner;
-	const GcAlgorithmVTable*  algo;
+	const gc_algorithm_vtable*  algo;
 	size_t                    iterations;
 	size_t                    minor_every;
 	size_t                    i;
@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 
-	owner_handle = gc_handle_acquire(rt, (GcHeader*)owner, GC_HANDLE_PINNED);
+	owner_handle = gc_handle_acquire(rt, (gc_header*)owner, GC_HANDLE_PINNED);
 	if (owner_handle == NULL) {
 		fprintf(stderr, "failed to pin benchmark owner\n");
 		gc_thread_detach(thread);
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
 		}
 		leaf->payload[0] = (uint64_t)i;
 		leaf->payload[1] = (uint64_t)(i ^ 0x5a5a5a5au);
-		gc_store_ref(rt, thread, (GcHeader*)owner, &owner->slots[i % BENCH_SLOT_COUNT], (GcHeader*)leaf);
+		gc_store_ref(rt, thread, (gc_header*)owner, &owner->slots[i % BENCH_SLOT_COUNT], (gc_header*)leaf);
 		if (((i + 1u) % minor_every) == 0u) {
 			gc_collect_minor(rt);
 		}

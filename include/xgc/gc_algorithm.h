@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-typedef struct GcAlgorithmCaps {
+typedef struct gc_algorithm_caps {
 	uint8_t supports_moving;
 	uint8_t supports_compaction;
 	uint8_t supports_generations;
@@ -16,39 +16,40 @@ typedef struct GcAlgorithmCaps {
 	uint8_t supports_concurrent_mark;
 	uint8_t supports_concurrent_relocate;
 	uint8_t provides_deterministic_release;
-} GcAlgorithmCaps;
+} gc_algorithm_caps;
 
-typedef struct GcAlgorithmVTable {
-	const char*     name;
-	GcAlgorithmCaps caps;
+typedef struct gc_algorithm_v_table {
+	const char*       name;
+	gc_algorithm_caps caps;
 
-	void (*global_init)(GcRuntime* rt, const GcConfig* cfg);
-	void (*global_destroy)(GcRuntime* rt);
+	void (*global_init)(gc_runtime* rt, const gc_config* cfg);
+	void (*global_destroy)(gc_runtime* rt);
 
-	void (*thread_init)(GcRuntime* rt, GcThreadContext* thread);
-	void (*thread_destroy)(GcRuntime* rt, GcThreadContext* thread);
+	void (*thread_init)(gc_runtime* rt, gc_thread_context* thread);
+	void (*thread_destroy)(gc_runtime* rt, gc_thread_context* thread);
 
-	void* (*alloc)(GcRuntime* rt, GcThreadContext* thread, const GcDescriptor* desc, size_t size, uint32_t alloc_flags);
+	void* (*alloc)(gc_runtime* rt, gc_thread_context* thread, const gc_descriptor* desc, size_t size,
+	               uint32_t alloc_flags);
 
-	void (*post_alloc)(GcRuntime* rt, GcHeader* obj);
+	void (*post_alloc)(gc_runtime* rt, gc_header* obj);
 
-	void (*write_barrier)(GcRuntime* rt, GcThreadContext* thread, GcHeader* owner, GcHeader** slot, GcHeader* old_value,
-	                      GcHeader* new_value);
+	void (*write_barrier)(gc_runtime* rt, gc_thread_context* thread, gc_header* owner, gc_header** slot,
+	                      gc_header* old_value, gc_header* new_value);
 
-	GcHeader* (*read_barrier)(GcRuntime* rt, GcThreadContext* thread, GcHeader** slot);
+	gc_header* (*read_barrier)(gc_runtime* rt, gc_thread_context* thread, gc_header** slot);
 
-	void (*collect_minor)(GcRuntime* rt);
-	void (*collect_major)(GcRuntime* rt);
-	void (*collect_full)(GcRuntime* rt);
+	void (*collect_minor)(gc_runtime* rt);
+	void (*collect_major)(gc_runtime* rt);
+	void (*collect_full)(gc_runtime* rt);
 
-	void (*pin)(GcRuntime* rt, GcHeader* obj);
-	void (*unpin)(GcRuntime* rt, GcHeader* obj);
-} GcAlgorithmVTable;
+	void (*pin)(gc_runtime* rt, gc_header* obj);
+	void (*unpin)(gc_runtime* rt, gc_header* obj);
+} gc_algorithm_vtable;
 
-const GcAlgorithmVTable* xgc_default_algorithm(void);
-const GcAlgorithmVTable* xgc_algorithm_bacon_rajan(void);
-const GcAlgorithmVTable* xgc_algorithm_marksweep_stw(void);
-const GcAlgorithmVTable* xgc_algorithm_gen_copy_ms(void);
+const gc_algorithm_vtable* xgc_default_algorithm(void);
+const gc_algorithm_vtable* xgc_algorithm_bacon_rajan(void);
+const gc_algorithm_vtable* xgc_algorithm_marksweep_stw(void);
+const gc_algorithm_vtable* xgc_algorithm_gen_copy_ms(void);
 
 #ifdef __cplusplus
 }

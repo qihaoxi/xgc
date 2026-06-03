@@ -3,9 +3,9 @@
 #include <assert.h>
 #include <stdlib.h>
 
-static const GcDescriptor TEST_DESC = {
+static const gc_descriptor TEST_DESC = {
 	.name        = "BarrierTestObject",
-	.fixed_size  = sizeof(GcHeader),
+	.fixed_size  = sizeof(gc_header),
 	.flags       = 0u,
 	.kind        = 99u,
 	.trace_slots = NULL,
@@ -14,11 +14,11 @@ static const GcDescriptor TEST_DESC = {
 };
 
 int main(void) {
-	GcConfig   cfg;
-	GcVmHooks  hooks;
-	GcRuntime* rt;
-	GcHeader*  owner_a;
-	GcHeader*  owner_b;
+	gc_config   cfg;
+	gc_vm_hooks hooks;
+	gc_runtime* rt;
+	gc_header*  owner_a;
+	gc_header*  owner_b;
 
 	gc_config_init_default(&cfg);
 	memset(&hooks, 0, sizeof(hooks));
@@ -28,8 +28,8 @@ int main(void) {
 	assert(rt->barriers.old_to_young.count == 0u);
 	assert(rt->barriers.dirty_old_objects == 0u);
 
-	owner_a = (GcHeader*)calloc(1, sizeof(*owner_a));
-	owner_b = (GcHeader*)calloc(1, sizeof(*owner_b));
+	owner_a = (gc_header*)calloc(1, sizeof(*owner_a));
+	owner_b = (gc_header*)calloc(1, sizeof(*owner_b));
 	assert(owner_a != NULL);
 	assert(owner_b != NULL);
 	owner_a->desc = &TEST_DESC;

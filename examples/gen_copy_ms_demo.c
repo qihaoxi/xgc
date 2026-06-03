@@ -21,7 +21,8 @@ static void demo_trace_slots(GcHeader* obj, GcVisitSlotFn visit_slot, void* ctx)
 	}
 }
 
-static void demo_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot, void* ctx) {
+static void demo_trace_slots_range(GcHeader* obj, size_t byte_begin, size_t byte_end, GcVisitSlotFn visit_slot,
+                                   void* ctx) {
 	DemoNode* node = (DemoNode*)obj;
 	size_t    next_offset;
 
@@ -53,14 +54,14 @@ static void demo_scan_roots(void* vm_ctx, GcVisitSlotFn visit_root_slot, void* c
 }
 
 static const GcDescriptor DEMO_NODE_DESC = {
-	.name        = "GenCopyDemoNode",
-	.fixed_size  = sizeof(DemoNode),
-	.flags       = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
-	.kind        = 9,
-	.trace_slots = demo_trace_slots,
+	.name              = "GenCopyDemoNode",
+	.fixed_size        = sizeof(DemoNode),
+	.flags             = GC_DESC_FLAG_CONTAINS_REFS | GC_DESC_FLAG_HAS_FINALIZER,
+	.kind              = 9,
+	.trace_slots       = demo_trace_slots,
 	.trace_slots_range = demo_trace_slots_range,
-	.trace_edges = demo_trace_edges,
-	.finalize    = demo_finalize,
+	.trace_edges       = demo_trace_edges,
+	.finalize          = demo_finalize,
 };
 
 static DemoNode* demo_new_node(GcRuntime* rt, GcThreadContext* thread, const char* name) {
