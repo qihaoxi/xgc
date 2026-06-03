@@ -1,4 +1,4 @@
-#include "xgc/gc.h"
+#include "gc_internal.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -121,12 +121,15 @@ int main(int argc, char** argv) {
 	const gc_algorithm_vtable*  algo;
 	size_t                    iterations;
 	size_t                    minor_every;
+	size_t                    minor_runs;
 	size_t                    i;
 	double                    start_ms;
 	double                    elapsed_ms;
+	double                    minor_per_run_ms;
 
 	iterations = (argc > 1) ? parse_size_arg(argv[1], 200000u) : 200000u;
 	minor_every = (argc > 2) ? parse_size_arg(argv[2], 256u) : 256u;
+	minor_runs = 0u;
 
 	gc_config_init_default(&cfg);
 	cfg.gc_young_space_size = 2u * 1024u * 1024u;
@@ -178,19 +181,31 @@ int main(int argc, char** argv) {
 		gc_store_ref(rt, thread, (gc_header*)owner, &owner->slots[i % BENCH_SLOT_COUNT], (gc_header*)leaf);
 		if (((i + 1u) % minor_every) == 0u) {
 			gc_collect_minor(rt);
+			minor_runs++;
 		}
 	}
 	gc_collect_minor(rt);
+	minor_runs++;
 	elapsed_ms = bench_now_ms() - start_ms;
+	minor_per_run_ms = (minor_runs != 0u) ? (elapsed_ms / (double)minor_runs) : 0.0;
 
 	printf("benchmark=%s\n", "old_to_young_writes");
 	printf("algorithm=%s\n", (algo != NULL && algo->name != NULL) ? algo->name : "unknown");
 	printf("iterations=%zu\n", iterations);
 	printf("minor_every=%zu\n", minor_every);
+	printf("minor_runs=%zu\n", minor_runs);
 	printf("slot_count=%u\n", (unsigned)BENCH_SLOT_COUNT);
 	printf("elapsed_ms=%.3f\n", elapsed_ms);
 	printf("ns_per_store=%.2f\n", (elapsed_ms * 1000000.0) / (double)iterations);
 	printf("stores_per_sec=%.2f\n", ((double)iterations * 1000.0) / elapsed_ms);
+	printf("avg_minor_ms=%.4f\n", minor_per_run_ms);
+	printf("minor_collections=%zu\n", rt->stats.minor_collections);
+	printf("dirty_old_objects=%zu\n", rt->barriers.dirty_old_objects);
+	printf("dirty_cards=%zu\n", rt->barriers.dirty_cards);
+	printf("young_used_bytes=%zu\n", rt->heap.young_used);
+	printf("old_object_count=%zu\n", rt->heap.old_object_count);
+	printf("old_object_bytes=%zu\n", rt->heap.old_object_bytes);
+	printf("peak_allocated=%zu\n", rt->stats.peak_allocated);
 
 	gc_handle_release(owner_handle);
 	gc_collect_full(rt);

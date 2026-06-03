@@ -56,3 +56,10 @@ dkms.conf
 /cmake-build-c-debug/
 /cmake-debug-build/
 .idea
+/cmake-build-bench/
+/cmake-build-debug/
+/cmake-build-gen/
+/cmake-build-ms/
+/cmake-build-mt/
+/cmake-build-verify-gen/
+/cmake-build-verify-ms/

@@ -25,6 +25,7 @@ int main(void) {
 
 	rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
 	assert(rt != NULL);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.old_to_young.count == 0u);
 	assert(rt->barriers.dirty_old_objects == 0u);
 
@@ -39,6 +40,7 @@ int main(void) {
 
 	assert(gc_barrier_register_owner(rt, owner_a, owner_a->size) == 1);
 	assert(gc_barrier_register_owner(rt, owner_b, owner_b->size) == 1);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.old_to_young.count == 2u);
 	assert(gc_barrier_is_owner_dirty(rt, owner_a) == 0);
 	assert(gc_barrier_is_owner_dirty(rt, owner_b) == 0);
@@ -46,6 +48,7 @@ int main(void) {
 	gc_barrier_mark_owner_dirty(rt, owner_a);
 	assert(gc_barrier_is_owner_dirty(rt, owner_a) == 1);
 	assert(gc_barrier_is_owner_dirty(rt, owner_b) == 0);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 1u);
 
 	gc_barrier_mark_owner_dirty(rt, owner_a);
@@ -53,19 +56,23 @@ int main(void) {
 
 	gc_barrier_mark_owner_dirty(rt, owner_b);
 	assert(gc_barrier_is_owner_dirty(rt, owner_b) == 1);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 2u);
 
 	gc_barrier_clear_owner_dirty(rt, owner_a);
 	assert(gc_barrier_is_owner_dirty(rt, owner_a) == 0);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 1u);
 
 	gc_barrier_unregister_owner(rt, owner_b);
 	assert(rt->barriers.old_to_young.count == 1u);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 0u);
 	assert(gc_barrier_is_owner_dirty(rt, owner_b) == 0);
 
 	gc_barrier_unregister_owner(rt, owner_a);
 	assert(rt->barriers.old_to_young.count == 0u);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 0u);
 
 	free(owner_a);

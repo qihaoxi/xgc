@@ -284,18 +284,3 @@ void gc_handle_release(gc_handle* handle) {
 
 	free(handle);
 }
-
-int gc_handle_check_invariants(const gc_handle* handle) {
-	if (handle == NULL) {
-		return 0;
-	}
-	if (handle->target != NULL) {
-		if (handle->target->size == 0u) {
-			return 0;
-		}
-		if (handle->target->desc == NULL) {
-			return 0;
-		}
-	}
-	return 1;
-}

@@ -726,6 +726,106 @@ gen_copy_ms::collect_full(...)
 如果要把这层背景压缩成一句最容易记住的话，就是：
 
 > **`xgc` 的存在，不是因为“想做一个很酷的新 GC”，而是因为旧 VM 的对象生命周期和 GC 代码已经难以通过局部修补继续演进。**
+
+### 0.x.9 框架契约（Framework Contract）
+
+如果说“分层图”解决的是**代码放哪里**，那么“框架契约”解决的是：
+
+> **每一层到底承诺什么，不能做什么，接入方必须负责什么。**
+
+这部分非常关键，因为它决定 `xgc` 是“几个算法 + 一些公共代码”，还是一个真正可复用的框架。
+
+#### 0.x.9.1 VM contract：VM / 运行时接入方必须保证什么
+
+VM 接入 `xgc` 时，至少要保证下面这些事：
+
+1. **所有纳入 GC 管理的对象都要带统一对象头**
+   - 也就是以 `gc_header` 开头，或等价地兼容 `gc_header`
+2. **所有能被精确遍历的对象，都要提供 `gc_descriptor`**
+   - 至少要说清楚：
+     - 如何枚举引用 slot
+     - 是否需要 finalize
+3. **所有 roots 都必须能进入 `scan_roots`**
+   - 包括：全局对象、线程栈、句柄、解释器保存的对象槽位等
+4. **所有影响 GC 可见性的引用写入，应尽量统一经过 `gc_store_ref(...)`**
+   - 这样算法才有机会挂接写屏障
+5. **如果 VM 长期持有某对象的裸指针，就必须遵守 pin / handle 约束**
+   - 这样未来 moving GC 才有演进空间
+
+一句话概括：
+
+> **VM 负责把对象模型和 roots 说清楚，`xgc` 负责回收。**
+
+#### 0.x.9.2 Algorithm contract：算法插件必须保证什么
+
+算法插件通过 `gc_algorithm_vtable` 接入框架，至少要满足这些约束：
+
+1. `alloc(...)` 返回的对象必须可被 `gc_alloc_typed(...)` 正常收尾
+   - 如果算法已经填好 `desc/size/kind/flags`，runtime 不会覆盖有效值
+2. `collect_minor / collect_major / collect_full` 完成后，runtime 统计要保持一致语义
+3. `write_barrier(...)` 只能处理“算法自己的增量语义”
+   - 不应该偷偷绕开公共基础层，重复实现 remembered-set
+4. `pin / unpin` 至少要保证不会破坏对象可达性与地址语义
+5. 算法如果依赖公共基础层（如 barrier/card table/worklist），要遵守这些基础层的不变量
+
+一句话概括：
+
+> **算法负责“怎么收集”，但不应破坏 runtime 和基础层的统一语义。**
+
+#### 0.x.9.3 Substrate contract：公共基础层必须保证什么
+
+`src/core/` 里的公共基础层，必须优先保证“可复用、可测试、语义稳定”。
+
+当前最关键的基础层契约可以概括成：
+
+- `bitmap`
+  - `resize/set/test/clear/clear_all` 语义稳定
+  - 越界访问不会破坏状态
+- `card_table`
+  - owner 注册、slot→card 映射、dirty card 计数、遍历、清理 语义一致
+  - 遍历 dirty cards 时，即使回调中表发生变化，也不能崩溃
+- `barrier`
+  - 对外只暴露统一 facade，不泄露具体 remembered-set 细节
+- `descriptor`
+  - `trace_slots_range` 可选
+  - 未实现 range tracing 时，必须安全 fallback 到 `trace_slots`
+- `worklist`
+  - 维持稳定的 LIFO 行为
+  - 自动扩容不破坏已有元素
+- `heap`
+  - young/old 统计不出现负计数/错误回退
+- `reclaim`
+  - finalize 调用顺序、内存回收、统计回退语义稳定
+
+一句话概括：
+
+> **公共基础层的第一职责不是“聪明”，而是“稳定、可复用、可验证”。**
+
+### 0.x.10 基础层测试矩阵（Substrate Test Matrix）
+
+为了让 `xgc` 真正像框架，而不是只靠算法 smoke test 撑着，基础层需要尽量形成独立测试矩阵。
+
+当前推荐的基础层矩阵如下：
+
+| 基础层组件 | 关键能力 | 当前测试 |
+|---|---|---|
+| `bitmap.c` | bit resize / set / clear / test | `test_bitmap_substrate` |
+| `card_table.c` | owner 注册、slot→card、dirty card 遍历与清理 | `test_card_table_substrate` |
+| `barrier.c` | facade 接口、dirty owner/card 计数联动 | `test_barrier_substrate` |
+| `descriptor.c` | range tracing / fallback 行为 | `test_descriptor_substrate` |
+| `worklist.c` | LIFO、扩容、空栈边界 | `test_worklist_substrate` |
+| `heap.c` | young/old 统计与空间状态 | `test_heap_substrate` |
+| `reclaim.c` | finalize、free、统计回退 | `test_reclaim_substrate` |
+
+理解这张表最重要的一点是：
+
+> **算法 smoke test 只能证明“整条链路大致可跑”；只有 substrate test 才能证明“框架零件本身是稳定的”。**
+
+所以后续如果继续扩展 `src/core/`，建议优先遵循这个顺序：
+
+1. 先定义基础层抽象
+2. 再给它单独写 substrate test
+3. 最后让某个算法接入使用
 ---
 ## 1. 设计目标
 ## 1.1 总目标

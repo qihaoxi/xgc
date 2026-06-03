@@ -45,6 +45,7 @@ int main(void) {
 
 	rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
 	assert(rt != NULL);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.old_to_young.card_granularity == 32u);
 	assert(rt->barriers.old_to_young.count == 0u);
 	assert(rt->barriers.dirty_old_objects == 0u);
@@ -61,6 +62,7 @@ int main(void) {
 
 	assert(gc_barrier_register_owner(rt, owner_a, owner_a_size) == 1);
 	assert(gc_barrier_register_owner(rt, owner_b, owner_b_size) == 1);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.old_to_young.count == 2u);
 	assert(gc_barrier_is_owner_dirty(rt, owner_a) == 0);
 	assert(gc_barrier_is_owner_dirty(rt, owner_b) == 0);
@@ -69,6 +71,7 @@ int main(void) {
 	gc_barrier_mark_slot_dirty(rt, owner_a, ((uint8_t*)owner_a) + 40u);
 	gc_barrier_mark_slot_dirty(rt, owner_a, ((uint8_t*)owner_a) + 80u);
 	gc_barrier_mark_slot_dirty(rt, owner_a, ((uint8_t*)owner_a) + 41u);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(gc_barrier_is_owner_dirty(rt, owner_a) == 1);
 	assert(rt->barriers.dirty_old_objects == 1u);
 	assert(rt->barriers.dirty_cards == 3u);
@@ -82,11 +85,13 @@ int main(void) {
 
 	gc_barrier_clear_owner_dirty(rt, owner_a);
 	assert(gc_barrier_is_owner_dirty(rt, owner_a) == 0);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 0u);
 	assert(rt->barriers.dirty_cards == 0u);
 
 	gc_barrier_mark_owner_dirty(rt, owner_b);
 	assert(gc_barrier_is_owner_dirty(rt, owner_b) == 1);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 1u);
 	assert(rt->barriers.dirty_cards == 2u);
 
@@ -98,11 +103,13 @@ int main(void) {
 
 	gc_barrier_unregister_owner(rt, owner_b);
 	assert(rt->barriers.old_to_young.count == 1u);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 0u);
 	assert(rt->barriers.dirty_cards == 0u);
 
 	gc_barrier_unregister_owner(rt, owner_a);
 	assert(rt->barriers.old_to_young.count == 0u);
+	assert(gc_runtime_check_invariants(rt) == 1);
 	assert(rt->barriers.dirty_old_objects == 0u);
 	assert(rt->barriers.dirty_cards == 0u);
 

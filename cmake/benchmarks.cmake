@@ -15,6 +15,7 @@ function(add_xgc_benchmark target_name source_file)
 endfunction()
 
 add_xgc_benchmark(bench_old_to_young_writes ${XGC_PROJECT_ROOT}/bench/old_to_young_writes.c)
+add_xgc_benchmark(bench_alloc_small ${XGC_PROJECT_ROOT}/bench/alloc_small.c)
 
 message(STATUS "xgc benchmarks enabled")
 
