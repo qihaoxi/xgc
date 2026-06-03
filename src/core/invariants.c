@@ -123,23 +123,61 @@ int gc_heap_check_invariants(const gc_heap* heap) {
 }
 
 int gc_runtime_check_invariants(const gc_runtime* rt) {
+	const gc_handle* handle;
+
 	if (rt == NULL) {
 		return 0;
 	}
+
+	/* 1. A runtime must have an algorithm bound. */
+	if (rt->algo == NULL) {
+		return 0;
+	}
+
+	/* 2. The algorithm must carry a non-NULL name. */
+	if (rt->algo->name == NULL) {
+		return 0;
+	}
+
+	/* 3. The gc_state field must be one of the three valid values. */
+	if (rt->gc_state != GC_STATE_RUNNING &&
+	    rt->gc_state != GC_STATE_STW_REQUESTED &&
+	    rt->gc_state != GC_STATE_STW_IN_PROGRESS) {
+		return 0;
+	}
+
+	/* 4. Delegate to shared-substrate invariant checkers. */
 	if (!gc_heap_check_invariants(&rt->heap)) {
 		return 0;
 	}
 	if (!gc_barrier_set_check_invariants(&rt->barriers)) {
 		return 0;
 	}
+
+	/* 5. Worklist consistency: capacity and data pointer must agree,
+	 *    and capacity cannot be negative. */
 	if (rt->worklist_capacity < 0) {
 		return 0;
 	}
 	if ((rt->worklist_capacity == 0) != (rt->worklist_data == NULL)) {
 		return 0;
 	}
+
+	/* 6. Peak allocation must never be below current allocation. */
 	if (rt->stats.total_allocated > rt->stats.peak_allocated) {
 		return 0;
+	}
+
+	/* 7. Every handle in the runtime's handle list must itself pass
+	 *    handle invariant checks, and its runtime back-pointer must
+	 *    point to this runtime. */
+	for (handle = rt->handles; handle != NULL; handle = handle->next) {
+		if (!gc_handle_check_invariants(handle)) {
+			return 0;
+		}
+		if (handle->runtime != rt) {
+			return 0;
+		}
 	}
 
 	return 1;
@@ -176,9 +214,8 @@ int gc_handle_check_invariants(const gc_handle* handle) {
 		return 0;
 	}
 	{
-		const gc_handle* cur = handle->runtime->handles;
+		const gc_handle* cur   = handle->runtime->handles;
 		int              found = 0;
-
 		while (cur != NULL) {
 			if (cur == handle) {
 				found = 1;
@@ -187,6 +224,31 @@ int gc_handle_check_invariants(const gc_handle* handle) {
 			cur = cur->next;
 		}
 		if (!found) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+int gc_worklist_check_invariants(const gc_worklist* wl) {
+	if (wl == NULL) {
+		return 0;
+	}
+
+	/* 1. top must stay within [0, capacity]. */
+	if (wl->top < 0 || wl->top > wl->capacity) {
+		return 0;
+	}
+
+	/* 2. A zero-capacity worklist must have no data buffer and an
+	 *    empty stack.  A positive-capacity worklist must have a
+	 *    non-NULL data buffer. */
+	if (wl->capacity == 0) {
+		if (wl->data != NULL || wl->top != 0) {
+			return 0;
+		}
+	} else {
+		if (wl->data == NULL) {
 			return 0;
 		}
 	}
