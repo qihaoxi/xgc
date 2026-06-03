@@ -208,25 +208,9 @@ int gc_handle_check_invariants(const gc_handle* handle) {
 		return 0;
 	}
 
-	/* 5. Cross-check: the handle must be reachable from the runtime's
-	 *    handle list (i.e. it has been acquired and not yet released). */
-	if (handle->runtime->handles == NULL) {
-		return 0;
-	}
-	{
-		const gc_handle* cur   = handle->runtime->handles;
-		int              found = 0;
-		while (cur != NULL) {
-			if (cur == handle) {
-				found = 1;
-				break;
-			}
-			cur = cur->next;
-		}
-		if (!found) {
-			return 0;
-		}
-	}
+	/* Note: cross-checks against the runtime's handle list live in
+	 * gc_runtime_check_invariants(), where the real rt pointer is
+	 * available rather than trusting handle->runtime blindly. */
 	return 1;
 }
 
