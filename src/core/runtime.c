@@ -5,6 +5,72 @@ static void gc_noop_visit_root_slot(gc_header** slot, void* ctx) {
 	(void)ctx;
 }
 
+/* ──────────────────────────────────────────────────────────────
+ * Contract validation — called once at startup.
+ *
+ * Goal: catch misconfigured algorithms and incomplete VM hooks
+ * before any allocation or GC work happens, instead of crashing
+ * deep inside a collection cycle.
+ * ────────────────────────────────────────────────────────────── */
+
+static int gc_validate_algorithm_contract(const gc_algorithm_vtable* algo) {
+	/* 1. Every algorithm must carry a human-readable name. */
+	if (algo->name == NULL) {
+		return 0;
+	}
+
+	/* 2. alloc and collect_full are mandatory for every algorithm. */
+	if (algo->alloc == NULL) {
+		return 0;
+	}
+	if (algo->collect_full == NULL) {
+		return 0;
+	}
+
+	/* 3. Capability flags must be consistent with the vtable.
+	 *    If the algorithm declares a capability, the corresponding
+	 *    function pointer must be non-NULL. */
+	if (algo->caps.requires_write_barrier && algo->write_barrier == NULL) {
+		return 0;
+	}
+	if (algo->caps.requires_read_barrier && algo->read_barrier == NULL) {
+		return 0;
+	}
+	if (algo->caps.supports_moving) {
+		if (algo->pin == NULL || algo->unpin == NULL) {
+			return 0;
+		}
+	}
+	if (algo->caps.supports_generations && algo->collect_minor == NULL) {
+		return 0;
+	}
+
+	return 1;
+}
+
+static int gc_validate_vm_contract(const gc_vm_hooks* hooks) {
+	/* VM hooks are currently not mandatory — algorithms that require
+	 * roots will find none, which is a valid degenerate case for
+	 * handle-only or alloc-only scenarios.  The contract is defined
+	 * here as a single hook point so future mandatory checks can be
+	 * added in one place. */
+	(void)hooks;
+	return 1;
+}
+
+int gc_runtime_validate_contracts(const gc_algorithm_vtable* algo, const gc_vm_hooks* hooks) {
+	if (algo == NULL) {
+		return 0;
+	}
+	if (!gc_validate_algorithm_contract(algo)) {
+		return 0;
+	}
+	if (!gc_validate_vm_contract(hooks)) {
+		return 0;
+	}
+	return 1;
+}
+
 void gc_runtime_apply_default_config(gc_config* cfg) {
 	if (cfg == NULL) {
 		return;
@@ -52,6 +118,15 @@ gc_runtime* gc_runtime_create(const gc_config* cfg, const gc_algorithm_vtable* a
 	}
 
 	rt->algo = (algo != NULL) ? algo : xgc_default_algorithm();
+
+	/* Validate contracts before allocating any resources — if the
+	 * algorithm is misconfigured, fail early with a clean NULL
+	 * instead of crashing mid-collection. */
+	if (!gc_runtime_validate_contracts(rt->algo, hooks)) {
+		free(rt);
+		return NULL;
+	}
+
 	gc_heap_init(&rt->heap, rt->cfg.gc_large_object_threshold);
 	rt->worklist_capacity = 256;
 	rt->worklist_data     = (gc_header**)calloc((size_t)rt->worklist_capacity, sizeof(gc_header*));

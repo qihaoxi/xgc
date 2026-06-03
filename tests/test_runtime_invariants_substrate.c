@@ -50,7 +50,7 @@ static void test_card_table_invariants(void) {
 	gc_card_table_destroy(&table);
 }
 
-/* ── runtime creation → default algo → passes ── */
+/* ── runtime invariants ── */
 
 static void test_runtime_default_passes(void) {
 	gc_config   cfg;
@@ -65,8 +65,6 @@ static void test_runtime_default_passes(void) {
 	gc_runtime_destroy(rt);
 }
 
-/* ── runtime without algorithm → fails ── */
-
 static void test_runtime_missing_algo_fails(void) {
 	gc_runtime rt_mem;
 	memset(&rt_mem, 0, sizeof(rt_mem));
@@ -74,18 +72,14 @@ static void test_runtime_missing_algo_fails(void) {
 	assert(gc_runtime_check_invariants(&rt_mem) == 0);
 }
 
-/* ── runtime with algorithm but NULL name → fails ── */
-
 static void test_runtime_null_algo_name_fails(void) {
-	gc_runtime            rt_mem;
-	gc_algorithm_vtable   fake_algo;
+	gc_runtime           rt_mem;
+	gc_algorithm_vtable  fake_algo;
 	memset(&rt_mem, 0, sizeof(rt_mem));
 	memset(&fake_algo, 0, sizeof(fake_algo));
 	rt_mem.algo = &fake_algo;
 	assert(gc_runtime_check_invariants(&rt_mem) == 0);
 }
-
-/* ── runtime gc_state invalid → fails ── */
 
 static void test_runtime_invalid_gc_state_fails(void) {
 	gc_config   cfg;
@@ -105,8 +99,6 @@ static void test_runtime_invalid_gc_state_fails(void) {
 
 	gc_runtime_destroy(rt);
 }
-
-/* ── runtime with dirty-card counter mismatch → fails ── */
 
 static void test_runtime_dirty_card_counter_mismatch(void) {
 	gc_config   cfg;
@@ -139,8 +131,6 @@ static void test_runtime_dirty_card_counter_mismatch(void) {
 	gc_runtime_destroy(rt);
 }
 
-/* ── runtime with young-space overflow → fails ── */
-
 static void test_runtime_young_space_overflow_fails(void) {
 	gc_config   cfg;
 	gc_vm_hooks hooks;
@@ -171,8 +161,6 @@ static void test_runtime_young_space_overflow_fails(void) {
 	gc_runtime_destroy(rt);
 }
 
-/* ── runtime peak < total → fails ── */
-
 static void test_runtime_peak_below_total_fails(void) {
 	gc_config   cfg;
 	gc_vm_hooks hooks;
@@ -193,8 +181,6 @@ static void test_runtime_peak_below_total_fails(void) {
 	gc_runtime_destroy(rt);
 }
 
-/* ── runtime worklist capacity/data mismatch → fails ── */
-
 static void test_runtime_worklist_consistency(void) {
 	gc_config   cfg;
 	gc_vm_hooks hooks;
@@ -205,8 +191,6 @@ static void test_runtime_worklist_consistency(void) {
 	memset(&hooks, 0, sizeof(hooks));
 	rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
 	assert(rt != NULL);
-
-	/* pass by default */
 	assert(gc_runtime_check_invariants(rt) == 1);
 
 	/* data == NULL but capacity > 0 — must fail */
@@ -214,15 +198,12 @@ static void test_runtime_worklist_consistency(void) {
 	rt->worklist_data    = NULL;
 	assert(gc_runtime_check_invariants(rt) == 0);
 
-	/* restore the real pointer so gc_runtime_destroy can free it */
+	/* restore so gc_runtime_destroy can free it */
 	rt->worklist_data = saved_data;
 	assert(gc_runtime_check_invariants(rt) == 1);
 
 	gc_runtime_destroy(rt);
 }
-
-/* ── runtime handle list: every handle must pass its own invariants
- *   and must back-point to this runtime ── */
 
 static void test_runtime_handle_consistency(void) {
 	gc_config   cfg;
@@ -237,8 +218,6 @@ static void test_runtime_handle_consistency(void) {
 	rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
 	assert(rt != NULL);
 
-	/* Use a plain calloc object — avoid coupling the invariant test
-	 * to any particular algorithm's allocator behaviour. */
 	obj = (gc_header*)calloc(1, sizeof(*obj));
 	assert(obj != NULL);
 	init_header(obj, 200u);
@@ -251,7 +230,7 @@ static void test_runtime_handle_consistency(void) {
 	assert(h2 != NULL);
 	assert(gc_runtime_check_invariants(rt) == 1);
 
-	/* break back-pointer — runtime invariant should catch it */
+	/* break back-pointer — invariant should catch it */
 	h1->runtime = (gc_runtime*)0x1;
 	assert(gc_runtime_check_invariants(rt) == 0);
 	h1->runtime = rt;
@@ -263,11 +242,11 @@ static void test_runtime_handle_consistency(void) {
 	obj->desc = &TEST_DESC;
 	assert(gc_runtime_check_invariants(rt) == 1);
 
-	/* release one handle — the other must still pass */
+	/* release one — the other still passes */
 	gc_handle_release(h2);
 	assert(gc_runtime_check_invariants(rt) == 1);
 
-	/* release last handle — list becomes empty */
+	/* release last — list becomes empty */
 	gc_handle_release(h1);
 	assert(gc_runtime_check_invariants(rt) == 1);
 
@@ -294,7 +273,8 @@ static void test_worklist_top_out_of_range_fails(void) {
 	memset(&wl, 0, sizeof(wl));
 	wl.data     = data;
 	wl.capacity = 2;
-	wl.top      = 3;
+
+	wl.top = 3;
 	assert(gc_worklist_check_invariants(&wl) == 0);
 
 	wl.top = -1;
@@ -306,15 +286,20 @@ static void test_worklist_top_out_of_range_fails(void) {
 
 static void test_worklist_zero_capacity_no_data(void) {
 	gc_worklist wl;
-	gc_header*  dummy;
-
-	memset(&wl, 0, sizeof(wl));
+	gc_header*  ptr;
 
 	/* clean zero state */
+	memset(&wl, 0, sizeof(wl));
 	assert(gc_worklist_check_invariants(&wl) == 1);
 
-	/* zero capacity but non-NULL data → fail */
-	wl.data = &dummy;
+	/* capacity 0 but data non-NULL */
+	ptr     = NULL;
+	wl.data = &ptr;
+	assert(gc_worklist_check_invariants(&wl) == 0);
+
+	/* capacity 0, data NULL, but top non-zero */
+	memset(&wl, 0, sizeof(wl));
+	wl.top = 1;
 	assert(gc_worklist_check_invariants(&wl) == 0);
 }
 
@@ -324,6 +309,103 @@ static void test_worklist_positive_capacity_null_data_fails(void) {
 	memset(&wl, 0, sizeof(wl));
 	wl.capacity = 4;
 	assert(gc_worklist_check_invariants(&wl) == 0);
+}
+
+/* ── contract validation: algorithm ── */
+
+static void test_contract_algo_null_fails(void) {
+	assert(gc_runtime_validate_contracts(NULL, NULL) == 0);
+}
+
+static void test_contract_alloc_missing_fails(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name = "fake";
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
+}
+
+static void test_contract_collect_full_missing_fails(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name  = "fake";
+	fake.alloc = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
+}
+
+static void test_contract_write_barrier_cap_mismatch(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name                        = "fake";
+	fake.alloc                       = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full                = (void (*)(gc_runtime*))0x1;
+	fake.caps.requires_write_barrier = 1;
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
+}
+
+static void test_contract_read_barrier_cap_mismatch(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name                       = "fake";
+	fake.alloc                      = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full               = (void (*)(gc_runtime*))0x1;
+	fake.caps.requires_read_barrier = 1;
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
+}
+
+static void test_contract_moving_missing_pin(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name                 = "fake";
+	fake.alloc                = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full         = (void (*)(gc_runtime*))0x1;
+	fake.caps.supports_moving = 1;
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
+}
+
+static void test_contract_generations_missing_minor(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name                      = "fake";
+	fake.alloc                     = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full              = (void (*)(gc_runtime*))0x1;
+	fake.caps.supports_generations = 1;
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
+}
+
+static void test_contract_minimal_valid_passes(void) {
+	gc_algorithm_vtable fake;
+	memset(&fake, 0, sizeof(fake));
+	fake.name         = "minimal";
+	fake.alloc        = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full = (void (*)(gc_runtime*))0x1;
+	assert(gc_runtime_validate_contracts(&fake, NULL) == 1);
+}
+
+static void test_runtime_create_rejects_broken_contract(void) {
+	gc_config           cfg;
+	gc_vm_hooks         hooks;
+	gc_algorithm_vtable bad;
+	gc_runtime*         rt;
+
+	gc_config_init_default(&cfg);
+	memset(&hooks, 0, sizeof(hooks));
+	memset(&bad, 0, sizeof(bad));
+	bad.name = "broken";
+	rt = gc_runtime_create(&cfg, &bad, &hooks);
+	assert(rt == NULL);
+}
+
+static void test_runtime_create_accepts_valid_contract(void) {
+	gc_config   cfg;
+	gc_vm_hooks hooks;
+	gc_runtime* rt;
+
+	gc_config_init_default(&cfg);
+	memset(&hooks, 0, sizeof(hooks));
+	rt = gc_runtime_create(&cfg, xgc_default_algorithm(), &hooks);
+	assert(rt != NULL);
+	assert(gc_runtime_check_invariants(rt) == 1);
+	gc_runtime_destroy(rt);
 }
 
 int main(void) {
@@ -344,6 +426,17 @@ int main(void) {
 	test_worklist_top_out_of_range_fails();
 	test_worklist_zero_capacity_no_data();
 	test_worklist_positive_capacity_null_data_fails();
+
+	test_contract_algo_null_fails();
+	test_contract_alloc_missing_fails();
+	test_contract_collect_full_missing_fails();
+	test_contract_write_barrier_cap_mismatch();
+	test_contract_read_barrier_cap_mismatch();
+	test_contract_moving_missing_pin();
+	test_contract_generations_missing_minor();
+	test_contract_minimal_valid_passes();
+	test_runtime_create_rejects_broken_contract();
+	test_runtime_create_accepts_valid_contract();
 
 	return EXIT_SUCCESS;
 }

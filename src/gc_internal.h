@@ -217,6 +217,9 @@ int gc_runtime_check_invariants(const gc_runtime* rt);
 int gc_handle_check_invariants(const gc_handle* handle);
 int gc_worklist_check_invariants(const gc_worklist* wl);
 
+/* startup contract validation — called once during gc_runtime_create */
+int gc_runtime_validate_contracts(const gc_algorithm_vtable* algo, const gc_vm_hooks* hooks);
+
 /* gc_purple.c */
 void gc_push_purple_adaptive(gc_runtime* rt, gc_thread_context* thread, gc_header* obj);
 
