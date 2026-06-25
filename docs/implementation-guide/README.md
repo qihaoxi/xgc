@@ -15,6 +15,11 @@
 | [05-算法实现详解.md](05-算法实现详解.md) | 6 种算法的完整伪代码、数据结构、关键陷阱、步骤拆解 |
 | [06-调试观测框架.md](06-调试观测框架.md) | 三层调试机制（invariant/event log/panic dump）、插桩点、使用方法 |
 | [07-高速GC优化路线.md](07-高速GC优化路线.md) | 分配/屏障/收集优化手段、atomic vs 无锁策略、性能度量标准 |
+| [08-弱引用与终结器.md](08-弱引用与终结器.md) | 弱引用语义、两阶段终结模型、复活处理、交互矩阵 |
+| [09-多线程与Safepoint.md](09-多线程与Safepoint.md) | 线程注册、协作式轮询、STW 时序、Epoch 机制、死锁规避 |
+| [10-内存分配器与堆布局.md](10-内存分配器与堆布局.md) | Arena/Page/Size-Class/Region 四层分配器、Space 抽象 |
+| [11-VM集成指南.md](11-VM集成指南.md) | Descriptor/Roots/写屏障/Handle 完整接入手册 + Checklist |
+| [12-统计度量与调优.md](12-统计度量与调优.md) | 扩展 gc_stats、背压机制、自适应触发、Benchmark 规范 |
 
 ---
 
