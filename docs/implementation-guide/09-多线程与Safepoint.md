@@ -42,6 +42,52 @@ struct gc_thread_context {
 };
 ```
 
+### 1.3 协程 / 绿色线程的根扫描
+
+> 这对应部署场景"**单线程多协程**"和"多线程 + 每线程多协程"。协程（coroutine / fiber / 绿色线程）有**自己的栈**，挂起时其栈上的局部变量仍持有活引用。GC 必须把**每个挂起协程的栈**也作为根来源枚举，否则协程恢复后会访问到被回收的对象。
+
+**核心难点**：挂起的协程不在任何 OS 线程的当前栈上，`scan_roots` 默认只扫到"正在运行的那个协程"的栈。必须让 VM 显式登记所有协程。
+
+```c
+// 协程在 GC 看来是一个"根来源"，由 VM 通过 hook 提供枚举
+typedef struct gc_coroutine {
+    void*       stack_lo;       // 栈内存区间 [lo, hi)
+    void*       stack_hi;
+    void*       saved_sp;       // 挂起时保存的栈指针（仅扫 [saved_sp, stack_hi)）
+    void*       vm_coro_ctx;    // VM 的协程对象，供精确栈图回调使用
+    int         state;          // RUNNING / SUSPENDED / DEAD
+} gc_coroutine;
+```
+
+**扫描时机与规则**：
+
+```c
+void gc_scan_all_coroutine_roots(gc_runtime* rt, gc_visit_slot_fn visit, void* ctx) {
+    for (each registered coroutine co) {
+        if (co->state == DEAD) continue;
+        if (co->state == RUNNING) continue;   // 正在跑的那个由普通线程栈扫描覆盖
+        // 挂起的协程：只扫已使用的栈区间 [saved_sp, stack_hi)
+        vm_scan_coroutine_stack(co->vm_coro_ctx, co->saved_sp, co->stack_hi, visit, ctx);
+    }
+}
+```
+
+要点：
+- **只扫 `[saved_sp, stack_hi)`**：协程栈上 `saved_sp` 以下是已弹出的垃圾帧，扫了会引入虚假根（保守式）或越界（精确式）。
+- **精确 vs 保守**：与普通栈一致（见文档 11/19）。精确式要求 VM 为协程的每个挂起点提供栈图；做不到精确时，协程栈按保守扫描——**但保守扫描的对象不能被 moving GC 移动**（无法安全更新栈内疑似指针），必须 pin。这是"单线程多协程 + moving 算法"组合的关键约束。
+- **safepoint 关系**：协程切换点（yield）天然是 GC 安全点——协程在 yield 处保存了完整状态。单线程多协程场景下，GC 只能在"当前没有协程处于半保存状态"时触发，即在调度器的协程边界，而非任意指令。把 `gc_safepoint_poll()` 放在协程调度循环里（每次 resume 前）即可，无需抢占式信号。
+- **单线程多协程的简化**：无并发，无需 STW 协调；GC 触发点就是分配失败或调度边界，串行扫描所有协程栈即可。复杂度远低于真多线程。
+
+VM 通过 hook 注册/注销协程：
+
+```c
+void gc_coroutine_register(gc_runtime* rt, gc_coroutine* co);
+void gc_coroutine_unregister(gc_runtime* rt, gc_coroutine* co);
+// 挂起/恢复时更新 saved_sp 与 state（VM 在 yield/resume 路径调用）
+void gc_coroutine_suspend(gc_coroutine* co, void* sp);
+void gc_coroutine_resume(gc_coroutine* co);
+```
+
 ---
 
 ## 2. Safepoint 机制
