@@ -160,15 +160,19 @@ src/core/safepoint.c（新建）
 
 ### 3.1 Background GC Thread
 
+> **需新增**：本节代码引用了两个真实代码尚不存在的符号：
+> - `rt->running`：runtime 的"是否运行中"标志，需在 `struct gc_runtime` 加一个 `int running`（或复用 `gc_state != 某个 SHUTDOWN 值`）。
+> - `rt->algo->collect_concurrent`：**真实 vtable 没有这个槽位**（vtable 当前 13 个成员，见 `gc_algorithm.h`）。并发算法（regional，Step J）若要后台线程驱动并发标记，需在 `gc_algorithm_vtable` **末尾追加** `void (*collect_concurrent)(gc_runtime* rt);`（末尾追加符合 14 §3.2 的 ABI 半稳定规则），非并发算法置 NULL。在此之前的 Step（A–I）都是 STW，用不到此槽，可先不加。
+
 ```c
 void* gc_background_thread_main(void* arg) {
     gc_runtime* rt = (gc_runtime*)arg;
-    while (rt->running) {
-        gc_wait_for_signal(rt);   // 条件变量等待
+    while (rt->running) {                 // rt->running 需新增
+        gc_wait_for_signal(rt);           // 条件变量等待（epoch.c 已有占位）
         if (!rt->running) break;
 
-        // 执行并发标记或其他后台工作
-        if (rt->algo->collect_concurrent)
+        // 执行并发标记或其他后台工作（仅并发算法填此槽，Step J 才用）
+        if (rt->algo->collect_concurrent) // vtable 需追加此槽
             rt->algo->collect_concurrent(rt);
     }
     return NULL;
