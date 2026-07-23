@@ -73,8 +73,8 @@ static void test_runtime_missing_algo_fails(void) {
 }
 
 static void test_runtime_null_algo_name_fails(void) {
-	gc_runtime           rt_mem;
-	gc_algorithm_vtable  fake_algo;
+	gc_runtime          rt_mem;
+	gc_algorithm_vtable fake_algo;
 	memset(&rt_mem, 0, sizeof(rt_mem));
 	memset(&fake_algo, 0, sizeof(fake_algo));
 	rt_mem.algo = &fake_algo;
@@ -194,8 +194,8 @@ static void test_runtime_worklist_consistency(void) {
 	assert(gc_runtime_check_invariants(rt) == 1);
 
 	/* data == NULL but capacity > 0 — must fail */
-	saved_data           = rt->worklist_data;
-	rt->worklist_data    = NULL;
+	saved_data        = rt->worklist_data;
+	rt->worklist_data = NULL;
 	assert(gc_runtime_check_invariants(rt) == 0);
 
 	/* restore so gc_runtime_destroy can free it */
@@ -335,9 +335,9 @@ static void test_contract_collect_full_missing_fails(void) {
 static void test_contract_write_barrier_cap_mismatch(void) {
 	gc_algorithm_vtable fake;
 	memset(&fake, 0, sizeof(fake));
-	fake.name                        = "fake";
-	fake.alloc                       = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
-	fake.collect_full                = (void (*)(gc_runtime*))0x1;
+	fake.name         = "fake";
+	fake.alloc        = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full = (void (*)(gc_runtime*))0x1;
 	fake.caps.requires_write_barrier = 1;
 	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
 }
@@ -345,9 +345,9 @@ static void test_contract_write_barrier_cap_mismatch(void) {
 static void test_contract_read_barrier_cap_mismatch(void) {
 	gc_algorithm_vtable fake;
 	memset(&fake, 0, sizeof(fake));
-	fake.name                       = "fake";
-	fake.alloc                      = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
-	fake.collect_full               = (void (*)(gc_runtime*))0x1;
+	fake.name         = "fake";
+	fake.alloc        = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full = (void (*)(gc_runtime*))0x1;
 	fake.caps.requires_read_barrier = 1;
 	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
 }
@@ -365,9 +365,9 @@ static void test_contract_moving_missing_pin(void) {
 static void test_contract_generations_missing_minor(void) {
 	gc_algorithm_vtable fake;
 	memset(&fake, 0, sizeof(fake));
-	fake.name                      = "fake";
-	fake.alloc                     = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
-	fake.collect_full              = (void (*)(gc_runtime*))0x1;
+	fake.name         = "fake";
+	fake.alloc        = (void* (*)(gc_runtime*, gc_thread_context*, const gc_descriptor*, size_t, uint32_t))0x1;
+	fake.collect_full = (void (*)(gc_runtime*))0x1;
 	fake.caps.supports_generations = 1;
 	assert(gc_runtime_validate_contracts(&fake, NULL) == 0);
 }
@@ -391,7 +391,7 @@ static void test_runtime_create_rejects_broken_contract(void) {
 	memset(&hooks, 0, sizeof(hooks));
 	memset(&bad, 0, sizeof(bad));
 	bad.name = "broken";
-	rt = gc_runtime_create(&cfg, &bad, &hooks);
+	rt       = gc_runtime_create(&cfg, &bad, &hooks);
 	assert(rt == NULL);
 }
 

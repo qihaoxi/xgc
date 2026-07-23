@@ -140,8 +140,7 @@ int gc_runtime_check_invariants(const gc_runtime* rt) {
 	}
 
 	/* 3. The gc_state field must be one of the three valid values. */
-	if (rt->gc_state != GC_STATE_RUNNING &&
-	    rt->gc_state != GC_STATE_STW_REQUESTED &&
+	if (rt->gc_state != GC_STATE_RUNNING && rt->gc_state != GC_STATE_STW_REQUESTED &&
 	    rt->gc_state != GC_STATE_STW_IN_PROGRESS) {
 		return 0;
 	}

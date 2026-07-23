@@ -104,8 +104,8 @@ static void test_invariant_top_out_of_range(void) {
 /* ── invariant: capacity==0 implies data==NULL and top==0 ── */
 
 static void test_invariant_zero_capacity_rules(void) {
-	gc_worklist  wl;
-	gc_header*   ptr;
+	gc_worklist wl;
+	gc_header*  ptr;
 
 	/* clean zero state */
 	memset(&wl, 0, sizeof(wl));
