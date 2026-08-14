@@ -279,7 +279,9 @@ static void gc_gen_finalize_dead_nursery(gc_runtime* rt, gc_gen_copy_ms_state* s
 	cursor = state->nursery_space;
 	end    = state->nursery_space + used_before;
 	while (cursor < end) {
-		gc_header* obj = (gc_header*)cursor;
+		/* 堆块按 gc_header 对齐分配（GC 保证），经 void* 中转表达"对齐已知"，
+		 * 消 clang -Wcast-align（uint8_t* 直转会报对齐提升） */
+		gc_header* obj = (gc_header*)(void*)cursor;
 		if (gc_gen_find_forward(state, obj) == NULL && obj->desc != NULL && obj->desc->finalize != NULL) {
 			obj->desc->finalize(obj);
 		}
@@ -479,7 +481,7 @@ static void* gc_gen_alloc(gc_runtime* rt, gc_thread_context* thread, const gc_de
 			gc_gen_collect_minor_impl(rt);
 		}
 		if (state->nursery_used + aligned_size <= state->nursery_capacity) {
-			obj = (gc_header*)(state->nursery_space + state->nursery_used);
+			obj = (gc_header*)(void*)(state->nursery_space + state->nursery_used);
 			memset(obj, 0, aligned_size);
 			state->nursery_used += aligned_size;
 			gc_heap_record_young_alloc(rt, aligned_size);
