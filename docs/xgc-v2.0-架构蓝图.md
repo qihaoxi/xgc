@@ -602,3 +602,25 @@ void gc_handle_release(GcHandle *h);
 - 蓝图不是“只服务于 RC + Bacon-Rajan”
 - 架构能真实容纳 Mark-Sweep、Generational、Copying/Compacting、RC 等多类算法
 - 下一阶段工作聚焦在**通用框架完善、抽象稳定与性能 substrate**
+
+### 15.1 工业先例与边界（2026-09-03 增补）
+
+本蓝图的 core/algo 两分法与插件模型有直接工业同构物，非理论设计：
+
+| 本蓝图 | 工业同构 | 差异（本蓝图更保守处） |
+|---|---|---|
+| `core/` substrate | HotSpot `gc/shared/`（card table/workgang/BarrierSet 基类）、MMTk `util/` | 同 |
+| `algo/<name>/` 插件 | HotSpot `gc/g1/ gc/z/ gc/parallel/`、MMTk `plan/`（SemiSpace/GenCopy/Immix…） | 同 |
+| caps + vtable 启动一致性校验 | HotSpot collector 声明与参数校验、MMTk plan 选择 | 本蓝图启动即校验，更显式 |
+| `-DGC_ALGORITHM=<name>` | HotSpot 启动期选 collector、Mono `--with-gc` 构建期、OpenJ9 策略选择 | 同为构建/启动期；**均无运行时热切换** |
+
+边界事实（影响后续设计判断，细则见 `src/algo/INTERFACE.md §7.5`）：
+- **算法拥有堆布局与策略是工业常态**（G1 region、ZGC 染色指针、分代 survivor 语义；
+  HotSpot `CollectedHeap` 按 collector 子类化）——core/algo 的分界是"机制 vs 决策"，
+  不是"副作用 vs 纯逻辑"。algo 禁的是**绕过 substrate 直碰 OS**，不是禁副作用。
+- **统一屏障入口只在慢路径成立**：Go/G1/ZGC 热路径屏障均为编译器特化内联。
+  本蓝图 v1（解释器 STW）统一走 `gc_store_ref` 收口；M5 JIT 落地时按 INTERFACE §7.5
+  条款 4 的双轨协议做特化内联 + debug 对照验证。
+- **验证**：oracle 差分 + 内建不变量不是理想化——HotSpot `VerifyBeforeGC/VerifyDuringGC`、
+  Go `gccheckmark`（STW 重标记核对并发标记）、.NET GCStress 同源。验证体系见
+  `docs/validation-plan.md`。

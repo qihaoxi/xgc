@@ -176,6 +176,33 @@ gc_store_ref(rt, thread, owner, slot, new_value)
 - remembered set / dirty card
 - mark bitmap / forwarding metadata
 - roots/handles 的统一 glue
+
+### 7.5 algo/ 边界纪律（可机械检查）
+
+**core/ = substrate 机制的唯一持有者；algo/ = 策略与阶段编排。** 禁的是"绕过"，不是"副作用"：
+
+1. `src/algo/**` **禁直接碰 OS**：内存只经 substrate 原语获取（arena/page API），同步只经
+   substrate 走——不得出现裸 `malloc/free`、禁 `pthread/mutex/atomic` 直接依赖。
+   判定规则：algo 文件里出现与 core 无关的内存/同步原语 = 边界破了（后续 CI 门拦截，
+   同 interp 卫生门思路）。
+2. 算法私有状态 = `global_init/thread_init` 挂载的**自持结构体**，不散落全局/静态变量。
+3. 算法拥有**决策权**：placement（对象进哪个 space）、阶段编排（minor/major 时序）、
+   触发启发式、重定位/晋升策略、evacuation 顺序；core 拥有**机制**：怎么搬（forwarding）、
+   怎么记（card/bitmap）、怎么扫（worklist）。
+4. **屏障双轨预告（M5 JIT 前必须重读）**：`gc_store_ref` 收口点是**语义收口**——解释器路径、
+   debug 断言、正确性验证全走它。将来 JIT 热路径必然需要**特化内联等价版本**（工业事实：
+   Go 写屏障 = 编译器内联 + 每-P 批量缓冲；G1/ZGC 屏障由 C2 特化内联，虚分发只在慢路径）。
+   JIT 内联不是"绕过收口点"红线——前提是内联版本与函数版本语义逐一对齐，且 debug 构建下
+   两者对照验证（同款思路：Go `gccheckmark` STW 重标记核对并发标记）。
+5. 算法间不互相依赖、不共享算法私有头——跨算法复用 = 下沉 core 或升 substrate。
+
+**先例**：MMTk（`plan/` 算法模块 + `policy/` 空间语义 + `util/` 底座，绑定 OpenJDK/V8 多 VM）
+与 HotSpot（`gc/<collector>/` + `gc/shared/`）的目录两分法同构；"collector 拥有堆布局与策略、
+共享对象模型/根/屏障机制"即 HotSpot `CollectedHeap` 按 collector 子类化的现状。
+
+**切换口径**：算法切换 = **构建期**（`-DGC_ALGORITHM=<name>`）或启动期选择；不做运行时热切换。
+工业无一例外（HotSpot/Mono/OpenJ9 皆构建或启动期定），可插拔的价值在研发迭代、实验对比与
+部署档位，不在运行中途换算法。
 ---
 ## 8. 推荐的首批算法插件
 建议按以下顺序建设：
