@@ -1,0 +1,19 @@
+@startuml
+title ZGC 单轮 GC 循环（相位状态机）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+hide empty description
+state "Mark Start\n(STW 停顿, 亚毫秒)" as MS
+state "Concurrent Mark\n(并发标记)" as CM
+state "Mark End\n(STW 停顿)" as ME
+state "Relocate Start\n(STW 停顿)" as RS
+state "Concurrent Relocate\n(并发重定位)" as CR
+[*] --> MS
+MS --> CM : 扫根+设 good 色后放行\n并发标记开始
+CM --> ME : 判定标记完成
+ME --> RS : 处理弱引用后进入下一步
+RS --> CR : 选 CSet+迁根后放行\n并发重定位开始
+CR --> MS : 清空 region 即回收；\n下一轮 Mark Start 兼任 Remap
+@enduml

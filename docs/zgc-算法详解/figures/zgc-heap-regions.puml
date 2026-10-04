@@ -1,0 +1,22 @@
+@startuml
+title Region 化的堆布局（逻辑上按需映射，非连续）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+component "Region 0\n空闲\n（可分配）" as R0 #lightgrey
+component "Region 1\n存活对象\n（低活跃）" as R1 #lightyellow
+component "Region 2\n标记中\n（本轮见到的对象）" as R2 #lightblue
+component "Region 3\nCollection Set\n（待搬离）" as R3 #lightpink
+component "Region 4\n已搬空\n（待回收进空闲表）" as R4 #lightgreen
+component "Region 5\n存活对象\n（高活跃）" as R5 #lightyellow
+component "Region 6\n大对象" as R6 #lightgrey
+component "Region 7\n……" as R7 #white
+R0 --> R1 : 物理页按需映射
+R1 --> R2 : 同一轮 GC 内\n各 region 相位可不同
+R2 --> R3
+R3 --> R4
+R4 --> R5
+R5 --> R6
+R6 --> R7
+@enduml

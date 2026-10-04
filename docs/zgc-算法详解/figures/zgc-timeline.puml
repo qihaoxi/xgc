@@ -1,0 +1,31 @@
+@startuml
+title ZGC 一轮完整 GC 的时间线（并发 vs 停顿）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam sequenceMessageAlign center
+participant "Mutator\n(应用线程)" as MT
+participant "读屏障\n(应用内嵌)" as RB
+participant "GC 线程" as GC
+
+group Mark Start 【STW 停顿 ~1ms】
+  GC -> GC : 扫描 GC 根并染色入栈；\n设置 good color（本轮 Marked0/1）
+end
+group Concurrent Mark 【并发】
+  MT -> MT : 应用正常运行（几乎零停顿）
+  GC -> GC : 从标记栈并发遍历，\n读屏障边读边修色
+end
+group Mark End 【STW 停顿 ~1ms】
+  GC -> GC : 标记收尾；\n处理弱引用 / finalizable
+end
+group Relocate Start 【STW 停顿 ~1ms】
+  GC -> GC : 按活跃度选 CSet；\n重定位 GC 根引用的对象
+end
+group Concurrent Relocate 【并发，直到下一轮 Mark Start】
+  GC -> GC : 并发搬移 CSet 内对象；\n清空 region 即回收
+  MT -> RB : 读到指向 CSet 的坏色引用
+  RB -> MT : 经转发表解析到新址，并自愈写回槽位
+end
+group 下一轮 Mark Start 【兼任上一轮的 Remap】
+  GC -> GC : 惰性修正残留的旧地址引用
+end
+@enduml

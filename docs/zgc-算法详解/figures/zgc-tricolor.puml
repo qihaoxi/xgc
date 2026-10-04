@@ -1,0 +1,19 @@
+@startuml
+title 三色抽象：并发遍历不漏标的判据
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+state "白色 White\n（未被本次标记发现）" as W
+state "灰色 Grey\n（已入标记栈，尚未扫描）" as G
+state "黑色 Black\n（已扫描其字段，视为存活）" as B
+W --> G : 被发现并放入标记栈
+G --> B : 扫描字段后转黑
+note right of G
+  并发标记的正确性判据：
+  绝不允许「黑对象直接指向\n白对象」，否则会被漏标
+end note
+note right of B
+  一切引用都必须经过\n灰色对象过渡（见正文）
+end note
+@enduml

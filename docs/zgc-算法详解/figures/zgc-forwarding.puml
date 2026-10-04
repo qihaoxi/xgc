@@ -1,0 +1,15 @@
+@startuml
+title 转发表：旧地址 → 新地址（对象被搬移后）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+object "旧对象 A\n（位于 CSet region 内）" as OLD #lightyellow
+object "转发数组\nA → A'\n（side table，不占用\n对象头/字段空间）" as FWD #lightblue
+object "新对象 A'\n（搬到高活跃 region）" as NEW #lightgreen
+OLD -right-> FWD : 地址经过寄存器/掩码\n映射为数组下标
+FWD -right-> NEW : 取到转发目标（新址）
+note bottom of FWD
+  之后 load barrier 会\n用 A' 的地址自愈写回原槽位
+end note
+@enduml

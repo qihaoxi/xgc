@@ -1,0 +1,17 @@
+@startuml
+title Multi-mapping：三份虚拟视图映射到同一份物理内存
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+object "Marked0 视图\n虚拟地址 = base | bit42" as M0
+object "Marked1 视图\n虚拟地址 = base | bit43" as M1
+object "Remapped 视图\n虚拟地址 = base | bit44" as RM
+object "物理内存页\n（三份映射是同一块\n页表项，内容相同）" as P
+M0 --> P : 硬件地址翻译指向\n同一物理页
+M1 --> P : 硬件地址翻译指向\n同一物理页
+RM --> P : 硬件地址翻译指向\n同一物理页
+note bottom of P
+  因此带颜色的指针无需先清位\n即可直接解引用——颜色只是\n到达这份内存的另一个虚拟地址
+end note
+@enduml

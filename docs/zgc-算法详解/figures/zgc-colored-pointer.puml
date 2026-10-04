@@ -1,0 +1,18 @@
+@startuml
+title 染色指针位布局（示意：42-bit 堆 + 4 元数据位）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+hide empty description
+component "63 … 46\n（未使用，\n硬件可忽略）" as U #lightgrey
+component "45\nFinalizable\n终结可达" as F #lightpink
+component "44\nRemapped\n已重映射" as RM #lightgreen
+component "43\nMarked1\n(奇数轮标记)" as M1 #lightblue
+component "42\nMarked0\n(偶数轮标记)" as M0 #lightblue
+component "41 … 0\n对象地址\n（堆内偏移）" as A #lightyellow
+U -right-> F : 元数据/颜色位
+F -right-> RM
+RM -right-> M1
+M1 -right-> M0
+M0 -right-> A
+@enduml

@@ -1,0 +1,23 @@
+@startuml
+title 读屏障（Load Barrier）快 / 慢路径与自愈
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+start
+:读取引用  colored = *slot;;
+if (colored == NULL ?) then (是)
+  :返回 NULL;
+  stop
+else (否)
+endif
+if (颜色 == good 色 ?) then (是)
+  :快路径：取地址直接用，无停顿;
+  stop
+else (否 · 坏色)
+  :慢路径：colored & 地址掩码 取出对象;
+  :若对象在 Collection Set →\n确保已被重定位（get/install forwarding）;
+  :用 good 色重新染色;\nCAS 自愈写回原槽位 (self-healing);
+  :返回修复后的对象地址;
+  stop
+endif
+@enduml
