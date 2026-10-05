@@ -78,7 +78,7 @@ GC 的第一性能指标是**停顿分布**，不是吞吐。
 perf P3 的 regress 编排（目录即趋势 + fence 分层）可直接消费 xgc run，GC 停顿作为
 secondary metric 进同一回归门。禁止在 xgc 里复制 compare 引擎（单一权威实现）。
 
-CI 分层（承 PEL 83 标签体系）：正确性门 **blocking**（三趟 sanitizer + 全测试）；
+CI 分层：正确性门 **blocking**（三趟 sanitizer + 全测试）；
 bench/soak **advisory**（nightly 记录趋势，不阻断；无稳定基线机前不做性能 blocking）。
 
 ---
@@ -96,6 +96,6 @@ bench/soak **advisory**（nightly 记录趋势，不阻断；无稳定基线机�
 ## 3. 明确不做
 
 - 运行时热切换算法（构建期 `-DGC_ALGORITHM` 已够，工业无一例外）
-- Valgrind 进 CI（与 ASan/LSan 覆盖重叠；仅本地排查，同 PEL 85 裁决）
+- Valgrind 进 CI（与 ASan/LSan 覆盖重叠；仅本地排查）
 - 形式化验证（研究界方向，测试基基建已足够当前阶段）
 - 性能 blocking 门（无稳定基线机；先 advisory 趋势，连续绿再议收紧）
