@@ -1,0 +1,26 @@
+@startuml
+title Pacer：目标堆、触发点与 assist 反馈环
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+
+rectangle "输入（上一轮测量）\nheapMarked：标记结束时存活堆\nlastStackScan / globalsScan：根规模\nconsMark：分配速率 / 扫描速率" as IN
+rectangle "heapGoal 每轮计算\nmin(\n  heapMarked +\n  (heapMarked+roots)*GOGC/100,\n  memoryLimitHeapGoal()\n)\n再取 max(…, heapMinimum)" as HG
+rectangle "trigger 触发点\ntrigger = clamp(heapGoal - runway,\n  minTrigger, maxTrigger)\nrunway ∝ consMark×预计扫描量\n（给 GC 留出的分配跑道）" as TR
+rectangle "并发标记\n后台 worker ≈ round(25%×GOMAXPROCS)\n（小核数补 fractional worker）\nassistWorkPerByte =\n  剩余扫描工作量 / 剩余堆空间" as MK
+rectangle "Mutator assist\n在 heapLive 逼近 trigger 时，\n每次 mallocgc 按比例偿还标记债务\n（负债上限缓冲 64KB）" as AS
+
+IN --> HG : endCycle / commit\n（测量值反馈）
+HG --> TR : 目标定好后\n反推触发点
+TR --> MK : heapLive ≥ trigger\n→ gcStart（开始并发标记）
+MK --> AS : 标记进度落后于分配\n→ assist 比例上升
+AS --> MK : 分配方帮忙扫描\n→ 标记进度追上
+MK --> IN : endCycle 重新测量 consMark\n（指数滑动/多轮均值）
+note bottom
+  过慢：assist 太多，mutator 变慢；
+  过快：堆长期贴近目标，内存放大。
+  GOMEMLIMIT 生效时 heapGoal 取二者较小值，
+  且 GOGC=off 也会因内存上限触发 GC
+end note
+@enduml

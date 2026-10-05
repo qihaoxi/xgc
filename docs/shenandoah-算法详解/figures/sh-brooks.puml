@@ -1,0 +1,27 @@
+@startuml
+title Brooks 指针：对象头多一个转发字（JDK 12 初版）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+left to right direction
+component "From-space 对象 A（oop 指向 Brooks 槽）\n[-8] Brooks 指针\n正常：指向自己\n疏散后：指向 A'" as BR #lightpink
+component "[0] mark word" as MW
+component "[8] class word" as CW
+component "[16..] 字段" as FLD
+component "To-space 副本 A'\n[-8] Brooks 指针 → A'\n（复制后的新权威副本）" as NEW #lightgreen
+BR --> MW : oop 落点
+MW --> CW
+CW --> FLD
+BR ..> NEW : GC 或 mutator 用 CAS 安装转发\n（多线程竞争只有一个赢家）
+note bottom of BR
+  访问任何对象前先解引用：
+  o = o->forwarded
+  正常时指向自己，语义不变；
+  疏散后自动改道到新副本
+end note
+note bottom of NEW
+  代价：每个对象多 1 个字（8B）
+  且每次访问（包括读 int 字段）
+  都要先经过屏障解析对象地址
+end note
+@enduml

@@ -1,0 +1,33 @@
+@startuml
+title G1 单轮大循环：Young-only 与 Space-Reclamation
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+hide empty description
+state "Normal Young GC\n(仅年轻代疏散, STW)" as NY
+state "Concurrent Start\n(Young GC + 初始标记, STW)" as CS
+state "Concurrent Mark\n(并发标记, 含根区扫描)" as CM
+state "Remark\n(STW, 排空 SATB 收尾)" as RE
+state "Cleanup\n(STW + 并发, 统计/选候选)" as CL
+state "Prepare Mixed\n(一次 Young GC)" as PM
+state "Mixed GC\n(年轻代 + 部分老年代, STW)" as MG
+state "Full GC\n(并行 mark-compact 回退)" as FG
+[*] --> NY
+NY --> NY : 继续晋升
+NY --> CS : 老年代占用达到 IHOP 阈值
+CS --> CM : 初始标记完成
+CM --> RE : 并发标记完成
+RE --> CL : 标记终结
+CL --> PM : 存在值得回收的候选
+CL --> NY : 垃圾不足(收益 < G1HeapWastePercent)
+PM --> MG : 下一次即可混合收集
+MG --> MG : 候选未取完且收益仍达标
+MG --> NY : 空间回收阶段结束
+NY --> FG : 疏散失败 / 分配失败
+MG --> FG : 疏散失败
+FG --> NY : 全堆整理完成
+note right of FG
+  正常路径应尽量避免 Full GC；
+  它是所有回退路径的兜底。
+end note
+@enduml

@@ -1,0 +1,29 @@
+@startuml
+title Remark（STW）的五类重扫来源
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+
+rectangle "根集合\n栈 / 寄存器 / 全局 / JNI" as R1 #LightYellow
+rectangle "年轻代\n整体作为根" as R2 #LightYellow
+rectangle "mod-union 表\n本轮所有脏过卡" as R3 #LightBlue
+rectangle "当前卡表\n仍为脏的卡" as R4 #LightBlue
+rectangle "灰队列\n增量更新 / 未完成标记" as R5 #LightGray
+rectangle "引用队列\n软 / 弱 / 虚 / finalizer" as R6 #Pink
+
+rectangle "Remark（STW）\n最终存活判定" as RM #LightCoral
+rectangle "完整存活位图\n进入 Concurrent Sweep" as OUT #LightGreen
+
+R1 --> RM
+R2 --> RM
+R3 --> RM
+R4 --> RM
+R5 --> RM
+R6 --> RM
+RM --> OUT
+note right of RM
+  CMSScavengeBeforeRemark=true 时
+  先做一次 Young GC，缩小根集合
+end note
+@enduml

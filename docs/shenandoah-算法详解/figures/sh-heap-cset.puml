@@ -1,0 +1,31 @@
+@startuml
+title Shenandoah Region 化堆与 CSet 选择
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+left to right direction
+component "R0\n垃圾 85%\n→ 入选 CSet" as R0 #lightpink
+component "R1\n垃圾 40%\n→ 入选 CSet" as R1 #lightpink
+component "R2\n垃圾 5%\n（低于阈值，保留）" as R2 #lightyellow
+component "R3\n全空\n→ 立即回收" as R3 #lightgreen
+component "R4\nHumongous\n大对象区" as R4 #lightblue
+component "R5\n垃圾 70%\n→ 入选 CSet" as R5 #lightpink
+R0 --> R1 : 候选 region 按垃圾量排序
+R1 --> R2
+R2 --> R3
+R3 --> R4
+R4 --> R5
+note bottom of R2
+  CSet 选择（adaptive 默认，Final Mark 内完成）：
+  ① 全空 region 记为立即垃圾，先回收
+  ② 候选按垃圾量降序排序
+  ③ 未满足 min_garbage 前不受阈值限制
+  ④ 之后只收垃圾占比 > ShenandoahGarbageThreshold(25%)
+  ⑤ CSet 总量受 ShenandoahEvacReserve(5%) 与
+     ShenandoahEvacWaste(1.2) 折算的上限约束
+end note
+note bottom of R4
+  对象大小 ≥ region 的 ShenandoahHumongousThreshold(100%)
+  时进入连续的 Humongous region，单独处理
+end note
+@enduml

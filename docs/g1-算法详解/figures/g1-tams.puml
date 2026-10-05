@@ -1,0 +1,26 @@
+@startuml
+title TAMS：Top-At-Mark-Start 与「分配即隐含存活」
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam roundcorner 6
+left to right direction
+rectangle "低地址\nbottom ～ TAMS\n快照前已分配的对象\n必须标记：白 → 灰 → 黑" as A #LightBlue
+rectangle "高地址\nTAMS ～ top\n快照之后新分配的对象\n隐含存活，不逐个标记" as B #LightGreen
+rectangle "每 region 一张标记位图\n1 bit / 8 字节（≈ 堆的 1/64）" as BM #Khaki
+A -[hidden]-> B : 地址递增
+A -[hidden]-> BM
+B -[hidden]-> BM
+note bottom of A
+  JDK 20 起（JDK-8210708）只有一份全堆 bitmap 和一个 TAMS；
+  此前经典实现是 prev/next 双 bitmap、双 TAMS，
+  Remark 时交换 prev/next。概念不变：
+  TAMS 以下的按位图判定，TAMS 以上的天然算活。
+end note
+note right of A
+  只在这一段查询/设置标记位
+end note
+note left of B
+  TAMS 随标记开始时刻的 top 一次确定
+end note
+@enduml

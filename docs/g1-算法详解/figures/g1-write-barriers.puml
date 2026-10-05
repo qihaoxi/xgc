@@ -1,0 +1,25 @@
+@startuml
+title G1 的两道写屏障（以 x.f = y 为例）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam roundcorner 6
+rectangle "① pre-write barrier（SATB 屏障）\n若并发标记进行中且旧值非空：\n把旧值 x.f 压入线程 SATB 缓冲" as Pre #LightCoral
+rectangle "② 真正的赋值\nx.f = y" as Asg #LightYellow
+rectangle "③ post-write barrier（记忆集屏障）\n算出 y 所在卡：\n若卡未脏则标脏并加入 refinement 队列" as Post #LightBlue
+rectangle "并发标记正确性\n保住「标记开始时的快照」" as G1 #WhiteSmoke
+rectangle "跨 region 引用完整性\n记住「谁指向收集区」" as G2 #WhiteSmoke
+Pre --> Asg
+Asg --> Post
+Pre -[hidden]right-> G1
+Post -[hidden]right-> G2
+G1 -[hidden]down-> G2
+note bottom of Pre
+  顺序关键：先记录旧值，再执行写入；
+  否则旧值可能被覆盖丢失 → 漏标。
+end note
+note bottom of Post
+  只需标记「目的地卡」；即使并发下重复标脏也无害
+  （refinement 幂等，最坏多扫一张卡）。
+end note
+@enduml

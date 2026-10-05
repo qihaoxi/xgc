@@ -1,0 +1,39 @@
+@startuml
+title G1 一个完整周期的时间线（Young-only → 并发标记 → Space-Reclamation）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "Mutator\n(应用线程)" as MT
+participant "写屏障\n(应用内嵌)" as WB
+participant "GC 线程\n(STW 并行 / 并发)" as GC
+group Young-only 阶段
+  GC -> GC : Normal Young GC（STW）：疏散 Eden/Survivor
+  MT -> MT : 继续分配，存活对象晋升老年代
+end
+group Concurrent Start（STW，搭车一次 Young GC）
+  GC -> GC : 初始标记：根直接可达对象置位；\n各 region 记录 TAMS；开启 SATB
+end
+group 并发标记阶段
+  GC -> GC : Root Region Scanning（并发）：\n扫 Survivor→Old 的引用
+  MT -> WB : 覆盖某引用字段
+  WB -> MT : 旧值入 SATB 队列后放行写入
+  GC -> GC : Concurrent Mark（并发）：沿位图遍历，\n定期 drain SATB
+end
+group Remark（STW，通常很短）
+  GC -> GC : 排空 SATB、终结标记；\n处理弱引用/finalizer、类卸载
+end
+group Cleanup（STW + 并发）
+  GC -> GC : 统计各 region 存活率；回收全空 region；\n选出候选并重建其 RS
+end
+group Space-Reclamation 阶段
+  GC -> GC : Prepare Mixed（一次 Young GC）
+  loop 直到候选收益 < G1HeapWastePercent(5%)
+    GC -> GC : Mixed GC（STW）：\n年轻代 + 垃圾最多的老年代 region
+  end
+end
+note over MT
+  整个周期里 Mutator 只在少数 STW 停顿点被暂停；
+  并发标记与 refinement 都由后台线程分担。
+end note
+@enduml

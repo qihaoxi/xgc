@@ -1,0 +1,39 @@
+@startuml
+title Shenandoah 一轮 GC 时间线（并发 vs STW）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 11
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "Mutator\n(应用线程)" as MT
+participant "LRB\n(应用内嵌)" as LRB
+participant "GC 线程" as GC
+group Concurrent Reset 【并发】
+  GC -> GC : 复位标记位图、捕获各 region TAMS
+end
+group Pause Init Mark 【STW，与堆大小基本无关】
+  GC -> GC : 扫根并初始标记；开启 SATB 写屏障
+end
+group Concurrent Marking 【并发】
+  MT -> MT : 应用正常运行
+  GC -> GC : 从根并发遍历；排空 SATB 队列
+end
+group Pause Final Mark 【STW】
+  GC -> GC : 终止标记、重扫根、处理弱引用；选 CSet
+end
+group Concurrent Roots + Cleanup + Evacuation 【并发】
+  GC -> GC : 更新线程根/强根、处理弱根；回收全空 region
+  GC -> GC : 搬 CSet 活对象（根引用的对象先搬）
+  MT -> LRB : 读到指向 CSet 的旧引用
+  LRB -> MT : 解码/帮助疏散 + CAS 自愈槽位
+end
+group Pause Init Update Refs 【STW，最短】
+  GC -> GC : 停止疏散；记录 UWM，准备线性扫描
+end
+group Concurrent Update Refs 【并发】
+  GC -> GC : 线性扫堆，把旧引用统一改到新副本
+  GC -> MT : handshake 更新线程根槽位
+end
+group Pause Final Update Refs 【STW】
+  GC -> GC : 更新剩余根；清 has_forwarded；回收 CSet
+end
+@enduml

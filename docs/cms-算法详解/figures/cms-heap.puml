@@ -1,0 +1,31 @@
+@startuml
+title CMS 堆布局：ParNew 年轻代 + CMS 老年代
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+
+rectangle "GC Roots" as R #LightYellow
+rectangle "年轻代 Young Gen（ParNew 负责）" as YG #LightBlue {
+  rectangle "Eden\nbump-pointer 分配" as E
+  rectangle "Survivor S0" as S0
+  rectangle "Survivor S1" as S1
+}
+rectangle "老年代 Old Gen（CMS 负责）" as OG #LightGreen {
+  rectangle "已分配对象" as O1
+  rectangle "free chunk\n（空闲列表）" as FL
+}
+rectangle "卡表 Card Table\n每 512B 对应 1 字节" as CT #LightYellow
+
+R --> E : 根
+R --> O1 : 根
+E --> S0 : Minor GC 复制
+S0 --> S1 : 再复制
+S0 --> O1 : 晋升 promotion
+O1 --> E : 跨代引用（脏卡记录）
+CT --> OG : 脏卡 -> 记忆集 / 增量更新
+note bottom of OG
+  老年代分配自 free list；CMS 不移动对象
+  晋升抬高占用率 -> 触发 CMS 周期
+end note
+@enduml

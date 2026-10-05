@@ -1,0 +1,29 @@
+@startuml
+title 记忆集三件套：卡表 → 脏卡队列 → refinement → PRT
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam roundcorner 6
+left to right direction
+rectangle "老年代 Region A\n对象 X 的字段 x.f" as A #LightBlue
+rectangle "年轻代 Region B\n对象 Y（被指向）" as B #LightGreen
+rectangle "卡表 Card Table\n整个堆，512 字节/卡\n引用字段所在卡置 dirty" as CT #Khaki
+rectangle "线程本地脏卡队列\n（写屏障入队）" as Q #Plum
+rectangle "并发 refinement 线程\n线程外把脏卡处理进 RS" as REF #LightSalmon
+rectangle "Region B 的 RS / PRT\n稀疏记录「谁指向我」\n(region 编号 + 卡地址)" as PRT #LightCyan
+A ..> B : 跨 region 引用
+A -[hidden]right-> B
+B -[hidden]down-> CT
+CT -[hidden]right-> Q
+Q -[hidden]down-> REF
+REF -[hidden]right-> PRT
+note bottom of CT
+  卡号 = 地址 >> 9；一张卡只要被写过一次就
+  标脏（粗粒度、幂等），不精确记录是哪个字段。
+end note
+note bottom of PRT
+  Young GC 时：年轻代没有代内 RS 也要扫；
+  RS 提供「老年代 → 年轻代」的引用位置，
+  作为年轻代疏散的堆根一部分。
+end note
+@enduml

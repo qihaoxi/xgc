@@ -1,0 +1,27 @@
+@startuml
+title 写屏障（Store Barrier）与 Minor GC 扫描脏卡
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+
+start
+:用户代码执行引用写：\no.f = y  （o 在老年代）;
+:写屏障：card = (addr(f) - heap_base) >> 9;
+if (card 已经是 DIRTY ?) then (是，跳过多余写入)
+  :什么也不做\n（UseCondCardMark 可减少缓存行伪共享）;
+else (否)
+  :card_table[card] = DIRTY;
+  :可选：把 card 追加到\n本线程脏卡队列，稍后处理;
+endif
+:写操作真正生效：o.f = y;
+stop
+
+note right
+  为什么只记录"老 → 新"？
+  年轻代对象在 Minor GC 时本来就整代扫描，
+  只有老年代→年轻代的引用可能在"只扫年轻代"时被漏掉。
+  写屏障记录跨代写，让 Minor GC 不必扫整个老年代。
+end note
+@enduml

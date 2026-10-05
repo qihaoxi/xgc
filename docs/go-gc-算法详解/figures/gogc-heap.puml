@@ -1,0 +1,40 @@
+@startuml
+title Go 运行时堆结构与分配路径（示意）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+
+rectangle "分配入口\nmallocgc(size, typ)\n（编译器插入；\n溢出/大对象走慢路径）" as MG
+
+package "每 P：mcache（无锁，紧贴 P）" {
+  rectangle "alloc[spanClass] 小对象 span\n（67 个尺寸类 × scan/noscan）" as MC
+  rectangle "tiny / tinyoffset / tinyAllocs\n（16B 块，仅无指针小对象）" as TINY
+}
+
+package "每 size class：mcentral" {
+  rectangle "partial[2]：有空位的 spanSet\nfull[2]：已满 spanSet\n下标 [0]/[1] 随 sweepgen 轮换\n（swept / unswept 角色互换）" as CENT
+}
+
+package "全局：mheap（1 个）" {
+  rectangle "HeapArena × N\n64 位非 Windows 64MB/个\n（Windows、32 位 4MB；Wasm 512KB）\n含 8192 个 8KB page" as ARENA
+  rectangle "mspan（span）\n若干连续 page；\nnelems/elemsize/freeindex\nallocBits / gcmarkBits" as SPAN
+  rectangle "页分配器 pageAlloc\nRadix tree + treap\nspan 拆分与相邻合并" as PA
+}
+
+MG -right-> TINY : size < 16B\n且不含指针
+MG -down-> MC : nextFreeFast()\nallocCache ctz（最快路径）
+MC -down-> SPAN
+MC -down-> CENT : alloc[spc] 满时\nrefill → cacheSpan
+CENT -right-> SPAN : 摘取有空位 span
+CENT -down-> PA : 无可用 span：\nallocSpan / grow
+PA -left-> SPAN : 分配并切分
+ARENA -up-> SPAN
+
+note bottom of ARENA
+  各数值随平台与 Go 版本变化：
+  page 恒为 8KB（PageShift=13）；
+  尺寸类共 68 个（0 号为空类，1..67 可用），
+  最大小对象 32KB；大于此走大对象路径
+end note
+@enduml

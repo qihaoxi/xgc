@@ -1,0 +1,34 @@
+@startuml
+title Mark Assist 债务模型：分配为借，扫描为还
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "Mutator G\n(gcAssistBytes 账户)" as G
+participant "mallocgc" as MA
+participant "gcAssistAlloc" as AA
+participant "GC 后台标记\n(bgScanCredit)" as BG
+
+G -> MA : mallocgc(size)
+MA -> G : gcAssistBytes -= size\n（分配即产生债务）
+alt gcAssistBytes < 0（欠债）
+  MA -> AA : deductAssistCredit → 进入 assist
+  AA -> AA : debtBytes = -gcAssistBytes\nscanWork = max(assistWorkPerByte×debtBytes,\n  gcOverAssistWork = 64KB)\n（小额也预还 64KB，摊薄开销）
+  AA -> BG : 先尝试偷取后台扫描信用
+  alt 信用足够
+    BG --> AA : bgScanCredit 扣减\nG 的账户转正，直接返回分配
+  else 信用不足
+    AA -> AA : gcDrainN(scanWork)\n自己扫描灰色对象来还债
+  end
+  alt 仍欠债（被抢占 / 无工作可做）
+    AA -> AA : gcParkAssist()\n挂入 assistQueue 睡眠；\n等 GC 结束或后台信用补足
+  end
+end
+note over AA
+  若 GC 已结束（gcBlackenEnabled==0）
+  或处于不可抢占上下文（持锁 / g0），
+  直接放弃 assist 并把债务清零/跳出；
+  这正是「awake 条件」：只有标记期、
+  可抢占、且账户为负时才真正干活
+end note
+@enduml

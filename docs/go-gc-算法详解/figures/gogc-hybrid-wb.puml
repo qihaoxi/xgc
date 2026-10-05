@@ -1,0 +1,33 @@
+@startuml
+title 混合写屏障：一次指针写入 shade 旧值与新值
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "Mutator goroutine" as M
+participant "gcWriteBarrier\n(编译期插入)" as WB
+participant "wbuf\n(per-P 写屏障缓冲)" as BUF
+participant "GC mark worker" as GW
+
+M -> WB : *slot = ptr\n（写入含指针的堆字段 / 全局）
+alt writeBarrier.enabled == false
+  WB -> M : 直接执行 *slot = ptr
+else 标记进行中（_GCmark / _GCmarktermination）
+  WB -> BUF : 记入旧值 *slot\n（Yuasa 删除屏障）
+  WB -> BUF : 记入新值 ptr\n（Dijkstra 插入屏障）
+  WB -> M : 执行 *slot = ptr\n（屏障先于发布写，pre-publication）
+end
+BUF -> BUF : 缓冲满 / GC 需要工作 / 分配路径\n调用 wbBufFlush()
+BUF -> GW : wbBufFlush1：逐个 greyobject()\n置 gcmarkBits 位并推入灰色队列
+
+note over WB
+  Go 1.8+ 等价伪代码（实现是无条件两次 shade）：
+  writePointer(slot, ptr):
+      shade(*slot)   // 被覆盖的旧值：防「堆 → 栈」隐藏
+      shade(ptr)     // 写入的新值：防「栈 → 黑对象」隐藏
+      *slot = ptr
+  shade(x) = if x 非白 { 忽略 } else { 标灰 + 入 wbuf }
+  // 内存序：两次 shade 都在 *slot=ptr 之前完成，
+  // 保证发布顺序；黑对象在此实现下是保守的
+end note
+@enduml

@@ -1,0 +1,50 @@
+@startuml
+title Serial / Parallel GC：一轮完整工作的时间线
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+
+participant "Mutator\n应用线程" as MT #E3F2FD
+participant "分配器\nTLAB / bump" as AL #E8F5E9
+participant "卡表\n写屏障" as CT #FFF9C4
+participant "GC 线程\n(1 个 = Serial, N 个 = Parallel)" as GC #F8BBD0
+
+group 正常分配（并发运行，无停顿）
+  MT -> AL : new Object()
+  AL -> AL : 在当前 TLAB 内 bump 指针\n（几乎无锁，极快）
+  MT -> CT : 执行 o.f = y（引用写）
+  CT -> CT : 写屏障标脏卡\n（少量指令，不暂停）
+end
+
+group Minor GC 【STW，暂停所有 Mutator】
+  GC -> GC : 并行扫描 GC 根\n+ 脏卡中的老→新引用
+  GC -> GC : 并行复制 Eden/S0 存活对象\n到 S1 / 晋升到 Old
+  GC -> GC : 年龄 +1；达到阈值或\nSurvivor 超一半 → 晋升
+  GC -> GC : 清空 Eden + S0，交换 S0/S1
+end
+
+group 恢复运行（并发）
+  MT -> AL : 在新 Eden 继续 TLAB 分配
+  MT -> CT : 老对象继续写引用 → 标脏卡
+end
+
+group Full GC 【STW，老年代空间不足 / 晋升失败时】
+  GC -> GC : ① 标记全堆可达对象
+  GC -> GC : ② 计算每个活对象的新地址
+  GC -> GC : ③ 更新根与对象字段中的引用
+  GC -> GC : ④ 滑动移动对象，清除标记
+end
+
+group 自适应反馈（可选，UseAdaptiveSizePolicy）
+  GC -> GC : 依据本次停顿/吞吐，\n调整 Eden、Survivor 与晋升阈值
+end
+
+note over MT, GC
+  Serial：GC 线程列只有 1 个；
+  Parallel：复制/标记/整理并行，停顿随存活对象量与并行度变化，
+  但仍与堆大小成正比——这是它与 ZGC 最本质的区别。
+end note
+@enduml

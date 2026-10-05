@@ -1,0 +1,26 @@
+@startuml
+title 卡表与 mod-union 表：一份记录服务两个目的
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+
+rectangle "老年代（按 512B 卡划分）" as OG #LightGreen {
+  rectangle "卡0 对象A" as C0
+  rectangle "卡1 对象B" as C1
+  rectangle "卡2 对象C" as C2
+  rectangle "卡3 对象D" as C3
+}
+rectangle "卡表 byte_map\nclean=0xFF dirty=0x00" as CT #LightBlue
+rectangle "mod-union 表\n本轮周期曾脏过的卡" as MU #LightYellow
+
+C0 --> CT
+C1 --> CT
+C2 --> CT
+C3 --> CT
+CT --> MU : Young GC 清卡表前\n把老年代脏卡并入
+note bottom of MU
+  用途1：ParNew 记忆集（老 -> 年轻代）
+  用途2：CMS 增量更新记录（并发期间改过）
+  Remark = 扫 mod-union + 当前卡表
+end note
+@enduml

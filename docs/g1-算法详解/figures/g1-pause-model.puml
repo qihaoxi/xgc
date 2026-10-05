@@ -1,0 +1,17 @@
+@startuml
+title 停顿预测：把 MaxGCPauseMillis 换算成「能搬多少 region」
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam roundcorner 6
+left to right direction
+rectangle "根扫描\n外部根/线程栈/代码根\n近似固定开销" as a #Khaki
+rectangle "RS 扫描\n∝ 待扫描卡片数\n（老年代→收集区引用）" as b #LightBlue
+rectangle "对象复制\n∝ 收集区存活字节\n（PLAB 复制+写转发）" as c #LightGreen
+rectangle "剩余预算\n→ 还能加几个候选 region" as d #WhiteSmoke
+a -[hidden]-> b
+b -[hidden]-> c
+c -[hidden]-> d
+note "总预算 = -XX:MaxGCPauseMillis=200ms（软目标，非硬保证）\n预测：基准成本 + 复制成本 + 每 region 其他成本；\n候选 region 按「垃圾收益 / 预测成本」贪心填入预算。" as N1
+note "历史样本：最近 10 次记录的衰减平均，\n再叠加置信度余量（G1ConfidencePercent=50）。\n预测失准 → 停顿超标 → 可能疏散失败/Full GC。" as N2
+@enduml

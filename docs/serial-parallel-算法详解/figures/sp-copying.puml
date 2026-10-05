@@ -1,0 +1,43 @@
+@startuml
+title Minor GC：复制收集（Eden + From 的存活对象 → To / Old）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+
+participant "from-space\nEden + S0\n（本轮回收目标）" as FROM #FFEBEE
+participant "to-space\nS1（本轮为空）" as TO #E8F5E9
+participant "Old 老年代" as OLD #FCE4EC
+participant "卡表 / 脏卡队列" as CT #FFF9C4
+
+group ① 标记 & 找根（STW 开始，所有 Mutator 暂停）
+  FROM -> CT : 扫描脏卡，把老→新引用\n也加入根集合
+  FROM -> FROM : 从栈/寄存器/全局根出发\n标记可达对象
+end
+
+group ② 复制 / 晋升（疏散/复制阶段，可并行）
+  FROM -> TO : 活对象 A（age=1）复制为 A'\n原地址写 forwarding pointer
+  FROM -> TO : 活对象 B（age=3）复制为 B'，age → 4
+  FROM -> OLD : 活对象 C（age=15）达到阈值\n整对象晋升到老年代
+  FROM -> FROM : 垃圾对象不搬运\n随 from-space 整体清空
+end
+
+group ③ Cheney 扫描 / 更新引用（可在复制阶段内完成）
+  TO -> TO : 扫描刚复制来的对象：\n若它引用其它 from-space 对象\n则继续复制（广度优先）
+  TO -> FROM : 所有指向旧地址的引用\n改写为新地址（同一对象只搬一次）
+end
+
+group ④ 收尾（STW 结束，Mutator 恢复）
+  note over FROM : Eden + S0 整块清空\n可复用为下一轮的 to-space
+  note over TO : 本轮 S0/S1 互换：\n下轮 from = 本轮 to
+end
+
+note over FROM, TO
+  正确性关键：复制期间 from-space 的对象内容
+  除"原地址头部写 forwarding pointer"外只读不改；
+  所有新数据只写 to-space，Mutator 已暂停，
+  因此不存在读写交错。
+end note
+@enduml

@@ -1,0 +1,47 @@
+@startuml
+title Shenandoah 单轮 GC 状态机（完整阶段）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+hide empty description
+state "Concurrent Reset\n（并发：复位位图、捕获 TAMS）" as RESET
+state "Pause Init Mark\n（STW：扫根、开启 SATB）" as IM
+state "Concurrent Marking\n（并发：遍历 + 排空 SATB）" as CM
+state "Pause Final Mark\n（STW：终止、弱引用、选 CSet）" as FM
+state "Concurrent Cleanup\n（并发：回收立即垃圾）" as CL1
+state "Concurrent Evacuation\n（并发：搬 CSet 活对象）" as EV
+state "Pause Init Update Refs\n（STW：停止疏散、准备扫描）" as IUR
+state "Concurrent Update Refs\n（并发：线性扫堆改引用）" as CUR
+state "Pause Final Update Refs\n（STW：更新剩余根、收尾）" as FUR
+state "Concurrent Cleanup\n（并发：整体回收 CSet region）" as CL2
+state "Degenerated GC\n（STW：从退化点继续）" as DEG
+state "Full GC\n（STW：整堆 mark-compact）" as FULL
+[*] --> RESET
+RESET --> IM
+IM --> CM
+CM --> FM
+FM --> CL1
+CL1 --> EV : CSet 非空
+CL1 --> IM : CSet 为空（短路，直接下一轮）
+EV --> IUR
+IUR --> CUR
+CUR --> FUR
+FUR --> CL2
+CL2 --> IM : 下一轮
+CM -[#red]-> DEG : 分配失败/取消
+FM -[#red]-> DEG : 分配失败/取消
+EV -[#red]-> DEG : 分配失败/取消
+CUR -[#red]-> DEG : 分配失败/取消
+DEG -[#red]-> FULL : 连续多次退化无进展\n(ShenandoahFullGCThreshold=3)
+FULL --> IM
+note right of DEG
+  退化点（degen point）：
+  outside_cycle / roots / mark /
+  evac / updaterefs
+  从断点处改为 STW 继续，而不是从头再来
+end note
+note bottom of FULL
+  仅作最后兜底：整堆压实，停顿与堆大小相关；
+  正常调优目标是让 Full GC 不发生
+end note
+@enduml

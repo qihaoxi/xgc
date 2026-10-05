@@ -1,0 +1,31 @@
+@startuml
+title Go 并发三色标记：非分代 + 弱三色不变量
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+state "白 White\n（本轮尚未标记 = 垃圾候选）" as W
+state "灰 Grey\n（已入标记队列，字段未扫描）" as G
+state "黑 Black\n（字段已全部扫描，确认存活）" as B
+W --> G : shade()\n（根扫描 / 写屏障 / 新分配置黑）
+G --> B : scanobject() 扫描全部指针字段\n（其中白字段再 shade 成灰）
+note right of W
+  非分代（non-generational）：
+  没有 young/old 划分，每轮所有
+  对象一律从「白」开始；
+  标记位图靠 allocBits/gcmarkBits
+  交换与复用清零，而不是清全堆
+end note
+note bottom of G
+  弱三色不变量（Go 1.8+ 混合屏障维持）：
+  允许「黑 → 白」边存在，但该白对象必须
+  能被某个灰堆对象经白链保护（grey-protected）；
+  因此不存在被永久隐藏的存活对象
+end note
+note right of B
+  新分配对象直接为黑
+  （allocate-black）：
+  它只可能指向已存在的对象，
+  不会破坏不变量
+end note
+@enduml

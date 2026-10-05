@@ -1,0 +1,34 @@
+@startuml
+title 增量更新写屏障：黑对象新增白引用时如何补救
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+
+participant "Mutator" as M
+participant "写屏障" as WB
+participant "卡表" as CT
+participant "Preclean / Remark" as GC
+
+group 并发标记进行中
+  M -> M : A 已扫完（黑）\n执行 A.f = Y（Y 为白）
+  M -> WB : store A.f
+  WB -> CT : 字段所在卡置 dirty\n(release 语义)
+  note right of CT
+    HotSpot 不立刻标灰
+    只记录「这里改过」
+  end note
+end
+
+group Preclean（并发）或 Remark（STW）
+  GC -> CT : 扫描脏卡
+  CT -> GC : 读到 A.f == Y
+  GC -> GC : Y 未标记 -> 标灰入栈
+  GC -> GC : 扫描 Y 的字段，Y 变黑
+end
+
+note over M, GC
+  对比 SATB（G1/ZGC）：
+  在写之前记录旧值，保证标记开始时刻的快照完整
+end note
+@enduml

@@ -1,0 +1,31 @@
+@startuml
+title G1 逻辑分代：Eden / Survivor / Old 只是 region 的集合
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam classAttributeIconSize 0
+left to right direction
+hide circle
+class "逻辑 Eden 集合" as E {
+  + R0
+  + R1
+  + R7（本轮新分配）
+}
+class "逻辑 Survivor 集合" as S {
+  + R2
+  + R5
+}
+class "逻辑 Old 集合" as O {
+  + R3
+  + R4
+  + R6（晋升/Humongous 语义）
+}
+E -[hidden]-> S
+S -[hidden]-> O
+note bottom of O
+  这些 region 在物理地址上互不相邻，
+  只是被贴上同一个逻辑代标签。
+  GC 以 region 为单位选 CSet（收集集合），
+  不是整代一起停止。
+end note
+@enduml

@@ -1,0 +1,40 @@
+@startuml
+title 卡表（Card Table）：每 512 字节堆对应 1 字节
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam rectangleBorderColor #444444
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+left to right direction
+
+rectangle "card k-1\n512B" as C0 #BBDEFB
+rectangle "card k\n512B\n含老对象 O 的引用字段 f" as C1 #FFCDD2
+rectangle "card k+1\n512B" as C2 #BBDEFB
+
+rectangle "byte k-1\nclean (0)" as B0 #FFF9C4
+rectangle "byte k\nDIRTY" as B1 #FF8A80
+rectangle "byte k+1\nclean (0)" as B2 #FFF9C4
+
+rectangle "每线程脏卡队列\nDirty Card Queue" as QUEUE #E8F5E9
+
+C0 -[hidden]-> C1
+C1 -[hidden]-> C2
+B0 -[hidden]-> B1
+B1 -[hidden]-> B2
+C1 --> B1 : 写 o.f = y 时，写屏障计算\ncard = (addr(f) - heap_base) >> 9\n（卡大小固定 512B = 2^9）
+B1 --> QUEUE : 入队，等 Minor GC 处理
+QUEUE --> C1 : Minor GC：按卡扫描\n找出老→新引用
+
+note bottom of B1
+  卡表 byte[] 大小 = 堆 / 512：
+  1TB 堆也只需约 2GB？实际按"堆的保留地址范围"摊销，
+  1 字节/512B ≈ 0.2% 空间开销。
+end note
+
+note top of C1
+  卡（Card）= 堆上连续的 2^9 = 512 字节。
+  一个卡里可能有多个对象、多个引用字段，
+  所以脏卡扫描是"按块粗扫"，会有少量多扫/误扫代价。
+end note
+@enduml

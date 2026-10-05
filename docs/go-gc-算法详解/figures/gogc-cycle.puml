@@ -1,0 +1,28 @@
+@startuml
+title Go 单轮 GC 状态机（两次极短 STW）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+state "Sweep Termination\n（STW #1，兼 mark setup）\n停世界；置 _GCmark、开写屏障、\n开 assist、排根任务；清残留 span" as ST
+state "Concurrent Mark\n（并发）\ndedicated / fractional / idle worker\n约 25% GOMAXPROCS；mutator assist" as CM
+state "Mark Termination\n（STW #2）\n停世界；置 _GCmarktermination；\nflush mcache；分布式终止；\n算 heapGoal/trigger；切 sweepgen" as MT
+state "Concurrent Sweep\n（并发 + 惰性）\nallocBits ← gcmarkBits；\nspan 归还 mcentral/mheap、页合并；\nscavenger 归还物理页" as SW
+state "Off / Waiting\n（sweeping 收尾后）\n触发：heapLive ≥ trigger、\nGOMEMLIMIT、2min 周期、runtime.GC()" as OFF
+[*] --> ST
+ST --> CM : startTheWorld\n写屏障已对所有 P 生效
+CM --> MT : gcMarkDone\n（无灰色、无根任务）
+MT --> SW : setGCPhase(_GCoff)\n写屏障关闭
+SW --> OFF : 无待 sweep span\n（或仍余少量，等下轮 ST）
+OFF --> ST : 触发条件满足 → gcStart
+note right of MT
+  两处 STW 工作量都与堆大小
+  基本无关；停顿更多取决于
+  停住所有 goroutine 的调度成本
+end note
+note right of SW
+  新分配对象从白开始；
+  分配会顺带推进 sweep，
+  不必等整轮清完
+end note
+@enduml

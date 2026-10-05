@@ -1,0 +1,25 @@
+@startuml
+title SATB 写屏障：覆盖引用前保存快照
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "Mutator\n(应用线程)" as MT
+participant "SATB 写屏障\n(pre-barrier)" as WB
+participant "线程本地缓冲\n(默认 1024 项)" as Q
+participant "GC 标记线程" as GC
+group Concurrent Marking 【并发】
+  MT -> WB : 执行 *field = new
+  WB -> WB : old = *field（覆盖前的旧值）
+  WB -> Q : 若 old 非空且未标记，入队 old
+  WB -> MT : 完成覆盖写
+  Q -> GC : 缓冲满 → 批量 flush 到全局队列
+  GC -> GC : 出队并标记 old\n（快照时可达的对象绝不丢）
+end
+note over GC
+  TAMS（Top-At-Mark-Start）：
+  每个 region 记录本轮快照水位；
+  水位之上的新对象视为隐式存活，
+  无需标记，也不会被误回收
+end note
+@enduml

@@ -1,0 +1,32 @@
+@startuml
+title CMS 必备基础总览：根、可达性、三色与写屏障
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+
+rectangle "GC Roots\n线程栈 / 寄存器 / 全局 / JNI" as R #LightYellow
+rectangle "可达对象（黑）\n字段已扫描完" as B #LightGray
+rectangle "灰色对象\n已发现、待扫描" as G #LightGray
+rectangle "白色对象\n尚未发现" as W #White
+rectangle "垃圾\n不可达，可回收" as T #MistyRose
+
+R --> B : 根直接可达\nInitial Mark 标灰
+B --> G : 扫描字段发现新对象
+G --> W : 尚未处理
+note right of W
+  三色不变量：
+  任何时刻不允许「黑 -> 白」边
+  出现则必须把白变灰，否则漏标
+end note
+
+rectangle "Mutator（应用线程）" as M #LightBlue
+rectangle "Collector（GC 线程）" as C #LightGreen
+rectangle "写屏障：记录被改动的引用" as WB #Pink
+M --> WB : 写引用
+WB --> G : 增量更新：让新值重新可见
+note bottom of C
+  STW：Initial Mark / Remark 两次短停顿
+  其余阶段并发执行
+end note
+@enduml

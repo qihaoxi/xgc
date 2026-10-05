@@ -1,0 +1,26 @@
+@startuml
+title Mixed GC 的 CSet 选择：垃圾最多者优先
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam roundcorner 6
+left to right direction
+rectangle "候选老年代 region（按 GC 效率从高到低排序）" as C #WhiteSmoke {
+  rectangle "R12  存活 8%\n垃圾 92%" as c1 #LightGreen
+  rectangle "R37  存活 15%\n垃圾 85%" as c2 #LightGreen
+  rectangle "R05  存活 30%\n垃圾 70%" as c3 #PaleGreen
+  rectangle "R88  存活 55%\n垃圾 45%" as c4 #Khaki
+  rectangle "R42  存活 84%\n垃圾 16%" as c5 #LightCoral
+}
+rectangle "本轮 Mixed CSet\n= 全部年轻代 + 选中的老年代" as S #LightBlue {
+  rectangle "全部 Eden + Survivor" as y #PaleGreen
+  rectangle "R12, R37, R05 …\n（按预算依次填充）" as o #LightGreen
+}
+c1 -[hidden]-> c2
+c2 -[hidden]-> c3
+c3 -[hidden]-> c4
+c4 -[hidden]-> c5
+c1 ..> y : 垃圾最多者先选
+note "存活率 ≥ G1MixedGCLiveThresholdPercent(85%)\n的 region 先被淘汰，不进入本轮候选。" as N1
+note "每轮老年代 region 数量约束：\n上限 = 堆 region 总数 × G1OldCSetRegionThresholdPercent(10%)；\n下限 ≈ 候选数 ÷ G1MixedGCCountTarget(8)；\n再按「垃圾收益 / 预测成本」贪心填到暂停预算用完。" as N2
+@enduml

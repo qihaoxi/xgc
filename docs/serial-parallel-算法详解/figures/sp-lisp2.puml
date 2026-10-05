@@ -1,0 +1,40 @@
+@startuml
+title Parallel Old / LISP2 标记-整理：四阶段滑动压缩
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam rectangleBorderColor #444444
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+
+rectangle "① 标记 Mark\n扫描可达对象并置位\n[A 活] [ 垃圾 ] [B 活] [ 垃圾 ] [C 活]\n可并行：所有 GC 线程一起标记" as P1 #E3F2FD
+rectangle "② 计算新地址 Compute new addresses\n从左到右给每个活对象分配新地址\nA→0, B→|A|, C→|A|+|B| ...\n只写位图/地址表，绝不改对象内容" as P2 #E8F5E9
+rectangle "③ 更新引用 Adjust pointers\n把根和所有对象字段里的旧地址\n改写为新地址\n此刻对象还躺在旧位置" as P3 #FFF9C4
+rectangle "④ 移动对象 Compact / Slide\n按新地址滑动搬运活对象\n（一次线性 memmove 式滑动）\n最后清除标记位" as P4 #F8BBD0
+
+P1 -> P2 : 标记完成后
+P2 -> P3 : 新地址确定后
+P3 -> P4 : 所有引用都已指向新址后
+
+note bottom of P2
+  为什么需要这一阶段？
+  移动前必须先知道"每个对象要去哪"，
+  否则多个对象会争抢同一段目标地址。
+  地址计算与对象内容无关，所以可以并行做。
+end note
+
+note bottom of P3
+  为什么引用先改、对象后搬？
+  移动时若引用还是旧地址，
+  一旦对象被覆盖就没法读了；
+  先改引用（引用自身仍有效）再搬对象，
+  移动阶段就变成纯粹的"按计划搬"。
+end note
+
+note bottom of P4
+  LISP2 = 标记/计算/改引用/移动 四趟线性扫描。
+  只要保证阶段 ② 与 ③ 的映射一致，
+  压缩后存活对象连续、空闲空间连续，
+  碎片被彻底消除。
+end note
+@enduml

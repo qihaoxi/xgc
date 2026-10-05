@@ -1,0 +1,28 @@
+@startuml
+title CMS 单轮周期状态机（六阶段）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+hide empty description
+
+state "Initial Mark\n(STW，很短)" as IM
+state "Concurrent Mark\n(并发三色遍历)" as CM
+state "Concurrent Preclean\n(并发，可中止)" as CP
+state "Remark\n(STW，最长停顿)" as RM
+state "Concurrent Sweep\n(并发清除，不移动)" as CS
+state "Concurrent Reset\n(并发重置)" as CR
+
+[*] --> IM
+IM --> CM : 扫根标灰后放行
+CM --> CP : 标记栈暂时清空
+CP --> RM : 脏卡收敛 / 超时 / 等到年轻代 GC
+RM --> CS : 根+脏卡+灰队列处理完
+CS --> CR : 垃圾块挂回 free list
+CR --> IM : 下一轮触发\n(占用率 / 动态估算)
+note right of RM
+  重扫来源：
+  根 + mod-union + 卡表
+  + 灰队列 + 弱引用
+end note
+@enduml

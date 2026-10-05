@@ -1,0 +1,27 @@
+@startuml
+title 并发清除：span 生命周期与标记位图交换
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+state "mSpanInUse\n（本轮尚未清除）\nsweepgen = h.sweepgen - 2" as U
+state "清除中（独占）\nCAS: sweepgen -2 → -1" as S
+state "已清除、可分配\nsweepgen = h.sweepgen\n（allocBits 已就绪）" as D
+U --> S : sweepone()\n或 mcentral.cacheSpan()\ntryAcquire（CAS）
+S --> S : 逐 slot 检查 gcmarkBits：\n已分配且未标记 → 释放该对象；\n写可复用/毒化内存（ASan/MSan）
+S --> D : ① allocBits ← gcmarkBits\n② gcmarkBits ← 新零位图\n③ freeindex = 0 / 刷新 allocCache\n④ atomic.Store(sweepgen, h.sweepgen)\n（④ 是发布栅栏：先行写对分配者可见）
+D --> U : 下一次 GC 的 mark termination\nh.sweepgen += 2
+note right of S
+  清除与分配可并发：
+  分配只会拿到 sweepgen 最新
+  的 span；span 清空前不会被
+  mcache/mcentral 复用
+end note
+note bottom
+  惰性 sweep 路径：mcache.nextFree 无空位 →
+  refill → mcentral.cacheSpan → deductSweepCredit
+  → 取一个待清 span 立即清（sweepone 兜底）；
+  后台 bgsweep 同时循环 sweepone。
+  整段 span 的对象全死 → 归还 mheap 并做相邻页合并
+end note
+@enduml

@@ -1,0 +1,34 @@
+@startuml
+title Update Refs：把散落的旧引用统一收敛
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "GC 线程" as GC
+participant "堆\n(region 线性扫描)" as HEAP
+participant "线程根\n(handshake)" as ROOTS
+participant "Mutator / LRB" as LRB
+group Pause Init Update Refs 【STW】
+  GC -> GC : 停止疏散；记录 UWM = 各 region top
+end
+group Concurrent Update Refs 【并发】
+  GC -> HEAP : 从 bottom 扫到 UWM，遍历每个活对象
+  GC -> HEAP : 槽位指向 CSet 旧地址 → CAS 改到新副本
+  LRB -> HEAP : 被访问到的坏引用即时自愈
+end
+group Pause Final Update Refs 【STW】
+  ROOTS -> ROOTS : 最后一遍更新根槽位
+  GC -> GC : has_forwarded = false；重建空闲表
+end
+GC -> HEAP : Concurrent Cleanup：CSet region 整体回收
+note over HEAP
+  UWM 之上的新分配不含旧地址
+  （字段写入前引用已经过 LRB 解析），
+  因此无需扫描
+end note
+note over ROOTS
+  根槽位不必在疏散前 STW 搬移：
+  并发根处理 + 栈水位线保证 mutator
+  恢复前根已处理；堆内引用靠 LRB 兜底
+end note
+@enduml

@@ -1,0 +1,23 @@
+@startuml
+title 三色抽象与漏标：并发标记的正确性判据
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+state "白色 White\n（本次标记尚未发现）" as W
+state "灰色 Grey\n（已入标记队列，字段未扫描）" as G
+state "黑色 Black\n（字段已扫描完，确定存活）" as B
+W --> G : 被发现并入队
+G --> B : 扫描完所有字段
+note right of G
+  并发标记期间 Mutator 仍在改引用
+  必须保证：不允许出现「黑 → 白」直达边
+  否则白对象会被漏标、当作垃圾回收
+end note
+note right of B
+  Shenandoah 的对策：
+  SATB 写屏障在「覆盖引用前」保存旧值
+  （快照语义），从根上消除漏标
+end note
+B -[#red]-> W : 禁止！漏标风险
+@enduml

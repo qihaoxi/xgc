@@ -6,6 +6,15 @@
 > **与 xgc 仓库的关系**：本文是"算法原理/教学"文档；xgc 自身的工程实现细则见
 > [implementation-guide/20-并发重定位读屏障与指针染色.md](../implementation-guide/20-并发重定位读屏障与指针染色.md) 等系列文档。
 > 本文的染色指针、读屏障设计与该文档完全同构，可互为佐证。
+>
+> **工业 GC 算法详解系列（建议按序阅读）**：
+> [Serial / Parallel 分代](../serial-parallel-算法详解/serial-parallel-算法详解.md) ·
+> [CMS](../cms-算法详解/cms-算法详解.md) ·
+> [G1](../g1-算法详解/g1-算法详解.md) ·
+> [Shenandoah](../shenandoah-算法详解/shenandoah-算法详解.md) ·
+> [Go GC](../go-gc-算法详解/go-gc-算法详解.md) ·
+> **ZGC（本文）**。
+> 前五篇覆盖吞吐型、并发标记型、分区低延迟型与非 Java 路线，本文是低延迟路线的另一端对照。
 
 ---
 

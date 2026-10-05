@@ -1,0 +1,30 @@
+@startuml
+title 并发清除：垃圾合并后挂入空闲列表
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+left to right direction
+
+rectangle "老年代线性扫描" as OG {
+  rectangle "活对象 A" as A #LightGray
+  rectangle "垃圾 B" as B #MistyRose
+  rectangle "垃圾 C" as C #MistyRose
+  rectangle "活对象 D" as D #LightGray
+  rectangle "垃圾 E" as E #MistyRose
+}
+rectangle "FreeChunk（B+C 合并）" as F1 #LightGreen
+rectangle "FreeChunk（E）" as F2 #LightGreen
+rectangle "Indexed Free List\n小对象按 size class" as IFL #LightBlue
+rectangle "Binary Tree Dictionary\n大块按大小组织" as DIC #LightBlue
+
+B --> F1 : 相邻垃圾合并
+C --> F1
+E --> F2
+F1 --> IFL
+F2 --> IFL
+F1 --> DIC : 大块
+note bottom of OG
+  不移动对象：省掉改引用，代价是碎片
+  扫描时顺带清除标记位
+end note
+@enduml

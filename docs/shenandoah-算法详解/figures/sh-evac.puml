@@ -1,0 +1,29 @@
+@startuml
+title 并发疏散：复制 + CAS 安装转发（唯一赢家）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "GC 工作线程 A" as A
+participant "GC 工作线程 B" as B
+participant "From-space 对象 O\n（位于 CSet）" as O
+participant "To-space 新副本" as N
+group Concurrent Evacuation 【并发】
+  A -> N : ① 分配空间并复制 O 的内容
+  B -> N : ①' 另一线程也在搬同一个 O
+  A -> O : ② CAS(mark_word, 旧值, 0b11|N)
+  A -> A : 赢：安装成功，权威副本 = N
+  B -> O : ②' CAS 失败，读到已安装的转发
+  B -> B : 输：丢弃自己的副本，改用 N
+end
+note over O
+  mark word 低 2 位 = 0b11 即已转发；
+  0b11 不是合法锁位组合，可安全区分
+end note
+note over A, B
+  转发只能有一个赢家：
+  否则同一对象出现两份权威副本，
+  引用更新会分叉。CAS 保证唯一性；
+  复制先于 CAS 完成（release 语义发布）
+end note
+@enduml

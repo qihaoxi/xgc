@@ -1,0 +1,31 @@
+@startuml
+title Go 一轮 GC 时间线（两次 STW 与 assist 窗口）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam sequenceMessageAlign center
+participant "Mutator goroutine" as MT
+participant "写屏障 / wbuf" as WB
+participant "GC mark worker" as GW
+participant "bgsweep / scavenger" as SW
+
+group Sweep Termination + Mark Setup 【STW #1，微秒~百微秒级】
+  GW -> GW : stopTheWorld；置 _GCmark；对每个 P 开写屏障；\n开 assist；排根任务；清掉残留未 sweep span
+end
+group Concurrent Mark 【并发，标记约 25% CPU】
+  GW -> GW : 扫描根（goroutine 栈停在安全点、全局、special 记录）
+  GW -> GW : gcDrain：灰对象出队 → 扫字段 → 白变灰
+  MT -> WB : 指针写入（堆/全局）→ 记录旧值+新值\n（混合屏障，pre-publication）
+  WB -> GW : wbBufFlush → shade 入灰队列
+  MT -> MT : heapLive 逼近 trigger 时\n【assist 窗口】mallocgc 按债务帮忙扫描
+end
+group Mark Termination 【STW #2】
+  GW -> GW : gcMarkDone 后停世界；置 _GCmarktermination；\nflush 所有 mcache；分布式终止确认无灰；\n计算下一轮 heapGoal/trigger；切换 sweepgen
+end
+group Concurrent Sweep 【并发 / 惰性，可跨到下一次触发前】
+  SW -> SW : 分配时按需清 span（mcentral.cacheSpan）\n+ 后台 bgsweep 推进；交换 allocBits/gcmarkBits
+  SW -> SW : 全空 span 归还 mheap、合并；scavenger 把空闲物理页还给 OS
+end
+group Off / 等待下一轮 【并发】
+  MT -> MT : 触发条件：heapLive ≥ trigger（GOGC）\n/ GOMEMLIMIT / 2min 周期 / runtime.GC()
+end
+@enduml

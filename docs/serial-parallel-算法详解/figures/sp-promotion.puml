@@ -1,0 +1,33 @@
+@startuml
+title 年龄计数、两次晋升路径与动态年龄判定
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+
+start
+
+:对象在 Eden 出生\n对象头 age = 0;
+
+:Minor GC：从 Eden / From 复制到 To\n每活过一次， age += 1;
+
+if (路径一：age >= MaxTenuringThreshold ?\n默认 15) then (是)
+  :晋升到老年代 Old;
+else (否)
+  if (路径二：动态年龄判定\nage <= N 的对象总大小 > Survivor 的 50% ?) then (是)
+    :把 age >= N 的对象\n全部提前晋升;
+  else (否)
+    :留在 To-space（下一轮的 From）\n等待下一次 Minor GC;
+    :再次溢出;
+  endif
+endif
+
+stop
+
+note right
+  动态年龄的目的：Survivor 只有 2 块且要留余量，
+  当"同龄人"太多时，与其让它们反复搬运，
+  不如整体提前晋升，避免 Survivor 溢出（promotion failure）。
+end note
+@enduml

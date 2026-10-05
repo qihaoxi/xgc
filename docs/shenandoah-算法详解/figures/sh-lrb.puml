@@ -1,0 +1,24 @@
+@startuml
+title LRB：转发指针复用 mark word + 读取时自愈（JDK 13+ 默认）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+left to right direction
+component "引用槽 &holder.field\n（仍存旧地址 A）" as SLOT #lightyellow
+component "From-space 对象 A\nmark word = 0b11 | A' 地址\n（低 2 位 = 0b11 表示已转发）" as OLD #lightpink
+component "To-space 对象 A'\n（唯一权威副本）\nmark word 正常，字段已复制" as NEW #lightgreen
+SLOT --> OLD : ① mutator 读到旧引用
+OLD --> NEW : ② 解码低 2 位得到新地址\n（若尚未转发则 mutator 帮忙疏散）
+NEW ..> SLOT : ③ CAS 自愈写回 A'
+note bottom of SLOT
+  快路径：测试线程本地 gc_state 的
+  HAS_FORWARDED 位，为 0 直接放行
+  （通常只有一条 test/jne 指令）
+  慢路径：CSet 成员检查 + 解码 + 自愈
+end note
+note bottom of OLD
+  from-space 副本内容已无用，
+  其 mark word 成为唯一转发记录；
+  对象头不再需要额外字段
+end note
+@enduml

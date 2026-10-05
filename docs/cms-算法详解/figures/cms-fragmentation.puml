@@ -1,0 +1,30 @@
+@startuml
+title 碎片、两类失败与 Full GC 回退决策
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+
+state "分配 / 晋升请求" as A
+state "free list 中有\n足够大的连续块？" as Q
+state "分配成功" as OK #LightGreen
+state "promotion failure\n(Young GC 晋升失败)" as PF #MistyRose
+state "concurrent mode failure\n(并发周期未完成，老年代已满)" as CMF #MistyRose
+state "STW Full GC\nSerial Old mark-compact" as FG #LightCoral
+state "压缩后恢复\n(碎片暂时缓解)" as REC #LightYellow
+
+[*] --> A
+A --> Q
+Q --> OK : 是
+Q --> PF : 否（年轻代晋升）
+Q --> CMF : 否（并发周期内老年代满）
+PF --> FG
+CMF --> FG
+FG --> REC
+REC --> A
+note right of FG
+  UseCMSCompactAtFullCollection=true（JDK8 默认）
+  CMSFullGCsBeforeCompaction=0（每次都压缩）
+  停顿与存活量成正比，可达秒级
+end note
+@enduml

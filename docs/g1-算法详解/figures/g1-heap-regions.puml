@@ -1,0 +1,35 @@
+@startuml
+title G1 堆布局：等大 region 与动态角色
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam roundcorner 6
+left to right direction
+rectangle "Region 0\nEden" as r0 #LightGreen
+rectangle "Region 1\nEden" as r1 #LightGreen
+rectangle "Region 2\nSurvivor" as r2 #PaleGreen
+rectangle "Region 3\nOld" as r3 #LightBlue
+rectangle "Region 4\nOld" as r4 #LightBlue
+rectangle "Region 5\nFree" as r5 #WhiteSmoke
+r0 -[hidden]-> r1
+r1 -[hidden]-> r2
+r2 -[hidden]-> r3
+r3 -[hidden]-> r4
+r4 -[hidden]-> r5
+note bottom of r5
+  角色是动态的：Free ↔ Eden / Survivor / Old /
+  Humongous；一次 GC 后整块 region 可换角色。
+  每个 region 大小相同（1–32MB，2 的幂）。
+end note
+rectangle "Region 6\nHumongous 起始\nStarts（含对象头）" as r6 #Orange
+rectangle "Region 7\nHumongous 续\nContinues（仅对象体）" as r7 #Orange
+rectangle "Region 8\nOld" as r8 #LightBlue
+r6 -[hidden]-> r7
+r7 -[hidden]-> r8
+note bottom of r7
+  大对象判定：size ≥ region/2 即 Humongous。
+  若 size 超过一个 region，占用连续多个 region
+  （首个 Starts，其余 Continues）；
+  最后一块 region 的尾部空间被浪费。
+end note
+@enduml

@@ -1,0 +1,26 @@
+@startuml
+title SATB：并发标记期间删除引用为什么不会漏标
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+participant "Mutator" as MT
+participant "pre-write\nbarrier" as PB
+participant "SATB 缓冲/队列" as Q
+participant "并发标记线程" as CM
+group 快照建立 Concurrent Start（STW）
+  CM -> CM : 各老年代 region 记录 TAMS = 当时 top；\n根直接可达对象直接置位标记
+end
+group 并发运行：A.f 原指向 B，B 尚未被标记（白）
+  MT -> PB : A.f = y（覆盖旧值 B）
+  PB -> Q : 旧值 B 入队（非 null 才记录）
+  PB -> MT : 屏障放行，执行真正的写入
+  Q -> CM : 并发 drain SATB：把 B 标记为灰
+  CM -> CM : 沿 B 继续遍历，B 在本轮保持存活
+end
+note over MT
+  快照语义：标记开始那一刻的存活对象，
+  即使中途被删除引用，本轮也按存活处理；
+  真正的回收留到下一轮标记。
+end note
+@enduml

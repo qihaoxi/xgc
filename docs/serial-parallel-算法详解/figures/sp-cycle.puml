@@ -1,0 +1,43 @@
+@startuml
+title Serial / Parallel GC：单轮 GC 与自适应反馈状态机
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+hide empty description
+
+state "正常分配\nbump + TLAB" as Alloc
+state "Eden 耗尽\n(TLAB 重填失败且 Eden 无空间)" as EdenFull
+state "Minor GC (STW)\n扫根 + 扫脏卡 + 复制" as Minor
+state "复制 / 晋升\n活对象 → To-space 或 Old" as Promote
+state "Survivor 是否放得下？" as SurvivorCheck
+state "晋升失败 Promotion Failure\n(老年代无空间容纳)" as Fail
+state "老年代压力\n(晋升/大对象直接分配)" as OldPressure
+state "Full GC (STW)\n标记-整理 LISP2" as Full
+state "自适应调整\n(UseAdaptiveSizePolicy)\nEden/Survivor/晋升阈值" as Adapt
+
+[*] --> Alloc
+Alloc --> EdenFull : 分配指针触顶
+EdenFull --> Minor : 触发
+Minor --> Promote : 暂停所有 Mutator
+Promote --> SurvivorCheck : 复制完成
+SurvivorCheck --> Alloc : 放得下\n(恢复运行)
+SurvivorCheck --> Full : 放不下 / 晋升失败
+OldPressure --> Full : 老年代分配失败\n或达到触发阈值
+Fail --> Full : 回退
+Full --> Adapt : 压缩完成，统计停顿/吞吐
+Adapt --> Alloc : 调整后代大小后恢复分配
+Promote --> OldPressure : 对象晋升
+OldPressure --> Alloc : 仍有空间
+
+note right of Minor
+  单线程 = Serial（DefNew）
+  多线程 = Parallel Scavenge
+  算法本身相同，只是复制并行化
+end note
+
+note bottom of Full
+  Minor GC 与 Full GC 都是 STW；
+  Serial Old 单线程整理，
+  Parallel Old 把四个阶段并行化。
+end note
+@enduml

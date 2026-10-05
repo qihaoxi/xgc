@@ -1,0 +1,36 @@
+@startuml
+title Serial / Parallel GC：可达性、分代堆布局与卡表总览
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+skinparam rectangleBorderColor #444444
+skinparam noteBackgroundColor #FFFBD6
+skinparam noteBorderColor #B8A400
+left to right direction
+
+rectangle "GC 根 Roots\n线程栈 / 寄存器\n全局静态变量 / JNI" as ROOTS #FFE0B2
+
+rectangle "Eden（新对象出生地）\nbump-the-pointer + TLAB\n占年轻代 8/10" as EDEN #BBDEFB
+rectangle "S0 (Survivor 0)\nfrom / to 轮转\n占年轻代 1/10" as S0 #C8E6C9
+rectangle "S1 (Survivor 1)\nfrom / to 轮转\n占年轻代 1/10" as S1 #C8E6C9
+rectangle "Old 老年代 Tenured\n长命对象 / 晋升对象\nSerial Old 或 Parallel Old\n标记-整理" as OLD #F8BBD0
+rectangle "卡表 Card Table\n每 512B 堆 = 1 字节\n记录老年代哪些卡\n写过引用" as CT #FFF9C4
+
+ROOTS --> EDEN : 根直接可达
+EDEN -[hidden]-> S0
+S0 -[hidden]-> S1
+S1 -[hidden]-> OLD
+EDEN --> S0 : Minor GC 复制存活对象
+S0 <-> S1 : 每次 Minor GC\nfrom / to 角色互换
+S1 --> OLD : age 达 MaxTenuringThreshold\n或 Survivor 放不下\n→ 晋升 promotion
+OLD --> CT : 老对象写引用时\n写屏障标脏卡（DIRTY）
+CT --> S0 : Minor GC 把脏卡\n当根扫描，找老→新引用
+
+note right of EDEN
+  SurvivorRatio=8（默认）：
+  Eden : 单个 Survivor = 8 : 1
+  年轻代 = Eden + S0 + S1。
+  不可达对象本轮不回收：
+  Minor GC 只清 Eden + From。
+end note
+@enduml

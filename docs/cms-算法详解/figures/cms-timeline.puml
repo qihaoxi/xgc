@@ -1,0 +1,36 @@
+@startuml
+title CMS 一轮完整周期的时间线（并发 vs 停顿）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+
+participant "Mutator\n(应用线程)" as MT
+participant "ParNew\n(年轻代)" as PN
+participant "CMS 线程" as GC
+
+group Initial Mark 【STW，通常 <1ms】
+  GC -> GC : 扫根（含年轻代）\n标记直接可达对象
+end
+group Concurrent Mark 【并发】
+  MT -> MT : 应用继续运行
+  GC -> GC : 多线程三色遍历\n写屏障弄脏卡
+end
+group Concurrent Preclean 【并发，可中止】
+  GC -> GC : 扫 mod-union + 卡表脏卡\n提前标灰
+  PN -> MT : 穿插的 Young GC（短 STW）
+end
+group Abortable Preclean 【并发，可中止】
+  GC -> GC : 等 Eden 占用降到约 50%\n把 Remark 排到年轻代停顿中间
+end
+group Remark 【STW，CMS 最长停顿】
+  GC -> GC : 重扫根 + 脏卡 + 灰队列\n弱引用 / 类卸载
+end
+group Concurrent Sweep 【并发】
+  GC -> GC : 线性扫老年代\n垃圾合并挂 free list
+  MT -> MT : 应用继续运行（可并发分配）
+end
+group Concurrent Reset 【并发】
+  GC -> GC : 清卡表 / mod-union\n调整堆大小，准备下一轮
+end
+@enduml
