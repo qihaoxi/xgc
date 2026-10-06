@@ -1,0 +1,19 @@
+@startuml
+title 为什么还需要 seq_cst：IRIW（两写者、两读者意见不一致）
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+participant "线程 1\nx = 1 (release)" as W1
+participant "线程 2\ny = 1 (release)" as W2
+participant "线程 3\n先读 x 再读 y" as R3
+participant "线程 4\n先读 y 再读 x" as R4
+W1 -> W1 : x = 1
+W2 -> W2 : y = 1
+R3 -> R3 : r1 = x (acquire) → 1\nr2 = y (acquire) → 0\n「我认为 x 比 y 先发生」
+R4 -> R4 : r3 = y (acquire) → 1\nr4 = x (acquire) → 0\n「我认为 y 比 x 先发生」
+note over R3, R4
+  两个读者对 x、y 两次写的先后顺序得出相反结论
+  acquire/release 允许这种结果（每条边局部看都合法）
+  seq_cst：所有 seq_cst 操作存在所有线程一致的全局全序，直接禁止
+end note
+@enduml

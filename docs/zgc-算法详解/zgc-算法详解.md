@@ -1,6 +1,6 @@
 # ZGC 算法详解 —— 从零基础到能照着实现
 
-> **面向读者**：完全没有 GC（垃圾回收）背景的开发者。本文从"内存为什么要回收"讲起，一路拆到 OpenJDK Z Garbage Collector（ZGC）的核心机制：染色指针、多映射、读屏障、并发标记与并发重定位。
+> **面向读者**：完全没有 GC（垃圾回收）背景的开发者。本文从"内存为什么要回收"讲起，一路拆到 OpenJDK Z Garbage Collector（ZGC）的核心机制：染色指针、多映射、读屏障、并发标记与并发重定位；另附一章**内存模型深入**（重排序、happens-before、release/acquire、seq_cst/relaxed），把并发正确性落到 C11 原子操作层面。
 > **目标**：读完并配合伪代码，你能独立实现一个 ZGC。文中所有示意图均由 PlantUML 生成，源文件在同目录 `figures/` 下（`.puml`）可复编译。
 >
 > **与 xgc 仓库的关系**：本文是"算法原理/教学"文档；xgc 自身的工程实现细则见
@@ -33,9 +33,10 @@
 11. [并发标记详解](#11-并发标记详解)
 12. [并发重定位与回收详解](#12-并发重定位与回收详解)
 13. [为什么它是正确的：并发安全论证](#13-为什么它是正确的并发安全论证)
-14. [从零实现一个 ZGC：最小可行路线](#14-从零实现一个-zgc最小可行路线)
-15. [术语速查表](#15-术语速查表)
-16. [延伸阅读与参考](#16-延伸阅读与参考)
+14. [内存模型深入：从 happens-before 到 acquire-release](#14-内存模型深入从-happens-before-到-acquire-release)
+15. [从零实现一个 ZGC：最小可行路线](#15-从零实现一个-zgc最小可行路线)
+16. [术语速查表](#16-术语速查表)
+17. [延伸阅读与参考](#17-延伸阅读与参考)
 
 ---
 
@@ -320,6 +321,7 @@ obj = v & 地址掩码;                  // 取出真实对象
 if (obj 在本轮 CSet 内) obj = forward(obj);   // 还没搬就现在搬/取转发
 healed = obj | good;                 // 重新染上好色
 CAS(slot, v, healed);                // 自愈写回，避免覆盖别人的新值
+                                     //（CAS 用 acq_rel，为什么：见 §14.5）
 return obj;
 ```
 
@@ -394,7 +396,7 @@ return obj;
 Mutator 访问某个还在 CSet、尚未搬的对象时：
 
 1. 读到引用，发现颜色是"坏色"（指向 CSet 的旧地址），触发读屏障慢路径；
-2. 读屏障查转发表：如果对象已被搬走，直接拿到新地址；如果还没搬，立刻由当前线程补搬一次，并安装转发记录（用 CAS 保证多线程并发搬同一对象时只有一个赢）;
+2. 读屏障查转发表：如果对象已被搬走，直接拿到新地址；如果还没搬，立刻由当前线程补搬一次，并安装转发记录（用 CAS 保证多线程并发搬同一对象时只有一个赢；"先复制、后发布"的内存序讲究见 §14.5）;
 3. 读屏障把新地址 + 好色**自愈写回**原槽位，以后都走快路径；
 4. 返回新地址给 Mutator。
 
@@ -425,9 +427,178 @@ ZGC 用读屏障保证：**Mutator 任何时刻读到一个"本轮未标记"（�
 > 误区："ZGC 停顿为零。"
 > 正解：ZGC 的停顿是**亚毫秒、且与堆大小无关**，但并**不是零**——它仍有三处极短 STW（Mark Start / Mark End / Relocate Start）。它的卖点是"停顿小且恒定"，不是"没有停顿"。
 
+### 13.4 别忘了隐含前提：内存序
+
+上面两条论证都默认了一件没说出口的事：**CAS、转发表的发布、good 色的读取，都用了正确的内存序**。"CAS 保证只有一个赢"在 C11 里成立的前提是它是原子操作；"acquire 读到发布值之后能看到完整对象"则依赖 release/acquire 配对。这套底层凭据在下一节（§14）严格展开。
+
 ---
 
-## 14. 从零实现一个 ZGC：最小可行路线
+## 14. 内存模型深入：从 happens-before 到 acquire-release
+
+前面各节反复出现 CAS、release、acquire、relaxed、seq_cst 这些词，一直没展开。这一节补齐：**为什么普通变量不行、这些"内存序"到底各自承诺什么、在 ZGC/xgc 里分别落在哪五个点位上**。读完你应该能回答：§9 的自愈 CAS 为什么是 acq_rel？§12 的转发安装为什么必须先复制后发布？
+
+> 本节讲的是通用原理；xgc 侧的原子 API 约定与逐操作内存序映射表，见
+> [implementation-guide/16-并发正确性与内存模型.md](../implementation-guide/16-并发正确性与内存模型.md) §4.4 与 §7，两边口径一致。
+
+### 14.1 为什么并发 GC 必须谈内存模型
+
+写单线程代码时，你默认程序按你写的顺序执行。一旦两个线程共享数据，这个直觉就崩了——有**三样东西都会偷偷改变"实际发生的顺序"**：
+
+1. **编译器重排**：优化器可以把互不依赖的读写调换位置（甚至在寄存器里缓存一个值、干脆不重读内存）。
+2. **CPU 乱序执行**：现代 CPU 为了填满流水线，会乱序发射指令、推测执行。
+3. **存储缓冲与缓存**：每个核心的写先落进自己的 store buffer，再异步刷入缓存体系；别的核心"晚一点"才看见，不同核心看到的落地顺序可以不同。
+
+关键是：**硬件和编译器只承诺"单线程看自己像顺序执行"，从不承诺两个线程对同一批事件看到相同顺序。**
+
+C11 对此给出硬性规定：**两个线程对同一非原子变量的冲突访问（至少一个是写），若没有被 happens-before 关系隔开，就是数据竞争（data race），行为未定义**——不是"读到旧值"这么温柔，而是编译器有权在此前提下做任何假设，产出任何代码。
+
+并发 GC 是数据竞争的"重灾区"：引用槽、转发表、good 色、标记栈全部被 mutator 和 collector 同时读写。内存序用错一个，症状是**偶发漏标、丢写、读到半个搬完的对象**，而且往往只在弱内存序平台（ARM）复现，x86 上"测一万次都对"。这就是必须按 C11 抽象、而不是按 x86 直觉写的原因（见 §14.6）。
+
+### 14.2 两个"眼睛会骗你"的实验
+
+**实验一：发布（publication）问题。**
+
+```c
+// 线程 A                                 // 线程 B
+data = 42;                                if (atomic_load_explicit(
+atomic_store_explicit(&ready, 1,              &ready, memory_order_acquire))
+              memory_order_relaxed);             use(data);   // 一定看到 42？
+```
+
+如果发布用的 store 是 `relaxed`（或干脆是普通赋值），线程 B 可能**先看到 `ready == 1`，再看到旧的 `data`**——A 的两次写在 B 眼里被调换了顺序。把 store 换成 `memory_order_release`，这对配对就成立了。这正是后文 §14.5 转发表安装所用的模式。
+
+**实验二：Dekker / StoreLoad 重排。**
+
+```c
+// 线程 1            // 线程 2
+x = 1;               y = 1;
+r1 = y;              r2 = x;
+// 结果可能是 r1 == 0 且 r2 == 0 —— 两个线程"互相都没看见"
+```
+
+单线程看各自代码，`x=1` 在 `r1=y` 之前，似乎至少有一方能读到 1。但 CPU 允许**读越过自己前面的写**先执行（写还在 store buffer 里排队，读已经完成），于是双方都读到 0——**连 x86 这样"强内存模型"的平台都允许**这种重排：
+
+![重排反例](figures/zgc-mem-reordering.png)
+
+这个例子说明：即使每次写都原子、都不丢，"顺序感"仍会背叛你。它是 **StoreLoad** 型重排，release/acquire 恰好管不住它，要么上 seq_cst、要么显式 fence（§14.4）。
+
+### 14.3 核心概念：synchronizes-with 与 happens-before
+
+C11 内存模型的全部可见性推理只靠两条边：
+
+- **synchronizes-with（同步于）**：线程 A 对原子变量 M 做 **release 写**，线程 B 对 M 做 **acquire 读**且**恰好读到 A 那次写的值**（或其释放序列上的后续 RMW 结果）——那么 A 的 release **之前的全部内存操作**，对 B 的 acquire **之后的操作**可见。
+- **happens-before（先于发生）**：同线程内的程序顺序（sequenced-before）加上跨线程的 synchronizes-with，取传递闭包。**若写 W happens-before 读 R，R 必须看到 W（或其后更新的值）**——这是"可见性"唯一的正式凭据。
+
+一个比喻：release 是**打包发货**（之前做的一切装进箱子），acquire 是**签收**（签收那一刻，箱子里所有东西对你就绪）。没签收的人看货架，"还是旧货"并不违法。
+
+![release/acquire 配对](figures/zgc-mem-release-acquire.png)
+
+还有一个容易被忽略的保底概念：**modification order（修改序）**。每个原子变量自己的所有写操作构成一个全序，**所有线程观点一致**——哪怕你全用 relaxed，这一条也成立。relaxed 缺的不是"这个变量自己的顺序"，而是"它与其他变量访问之间的顺序"。这正是 relaxed 能放心用于计数器的原因：计数器只有自己，没有要"捆绑发布"的伴生数据。
+
+### 14.4 六个 memory_order 逐个说清
+
+C11 `<stdatomic.h>` 一共六档，从弱到强：
+
+| 内存序 | 用在 | 承诺 | 一句话 |
+|--------|------|------|--------|
+| `relaxed` | load/store/RMW | 原子性 + 本变量的 modification order | "只管这一件，不管别人" |
+| `consume` | load | 数据依赖版的 acquire（实践降级，见下） | 知道即可，**别用** |
+| `acquire` | load（RMW 的读侧） | 它**之后**的读写不能提到它前面 | "签收：之后都能看到" |
+| `release` | store（RMW 的写侧） | 它**之前**的读写不能沉到它后面 | "发货：之前都打包" |
+| `acq_rel` | 仅 RMW | 读侧 acquire + 写侧 release，一次完成 | 一条指令干两件 |
+| `seq_cst` | 全部 | 上述之外，**所有 seq_cst 操作有全体一致的单一全序** | "所有人看同一部纪录片" |
+
+逐个展开：
+
+**relaxed** —— 只保证这次访问不可分割、并挂在该变量的 modification order 上；不建立与任何其他访问的顺序。适合**没有伴生数据**的场合：统计计数、水位、进度指标。GC 里大量分配/标记计数器都是 relaxed（§14.5 第 5 点）。
+
+**acquire / release** —— 必须成对出现在**同一个原子变量**上才生效。acquire 用于读侧（"我要消费别人发布的东西"），release 用于写侧（"我要发布我做好的东西"）。单用一边没有任何效果。这是并发编程中最常用的配对，也是 ZGC 转发表、标记栈的核心。
+
+**consume** —— 理论上是"只对**地址依赖**它的读保序"的轻量 acquire。但编译器有权消除假的数据依赖（把 `p->data` 优化成等价的重算），于是主流实现一律把 consume 当 acquire 处理。**结论：当作不存在，直接用 acquire。**
+
+**acq_rel** —— 只对 read-modify-write 操作（CAS、fetch_add、xchg）有意义：这类操作既读又写，acq_rel = 读侧 acquire + 写侧 release。xgc 的自愈 CAS、变色 CAS 都是这一档（§14.5 第 1 点）。
+
+**seq_cst** —— 最强也最贵。在 acquire/release 之上，额外保证：**所有线程对全部 seq_cst 操作看到同一个全序**。为什么需要这么强？看下面这个 acquire/release 管不住的 IRIW（Independent Reads of Independent Writes）反例：
+
+![IRIW](figures/zgc-mem-seq-cst.png)
+
+线程 3 认为 x 先于 y，线程 4 认为 y 先于 x——**两个旁观者意见相反**。每条 acquire/release 边局部看都合法，但"全局只有一个真相"这件事 acquire/release 保证不了；seq_cst 可以。什么时候真的需要它：实现 Dekker 互斥的初始双查、无锁算法要求所有人对"谁先谁后"达成一致（如 Michael-Scott 队列的某些变体）、以及一切"拿不准"的场合——**先 seq_cst 保证对，再 profile 后降级**，顺序别反。
+
+### 14.5 落到 ZGC/xgc：五个真实点位
+
+**1) 自愈 CAS —— `acq_rel`。** §9.2 慢路径的 `gc_cas_ref(slot, bad, healed)`：
+
+```c
+atomic_compare_exchange_strong_explicit(
+    (_Atomic uintptr_t*)slot, &expected, healed,
+    memory_order_acq_rel,      /* 成功：acq_rel */
+    memory_order_acquire);     /* 失败：acquire */
+```
+
+CAS 既是读又是写：读侧要 acquire 到"别的线程写进这个槽的最新合法值"（决定我下一步动作），写侧要 release 发布"我修好的引用"。多个 mutator 抢修同一槽位时，谁输谁赢由槽位自身的 modification order 裁决——**输的线程不会覆盖赢的结果，只会拿新值重来**，不丢更新。
+
+**2) 转发项安装 —— 先复制（普通写），后发布（release）。** §12.3 的转发：
+
+```c
+memcpy(new_addr, old_addr, size);          // 普通写：把对象副本做好
+atomic_store_explicit(&fwd_table[i], new_addr,
+                      memory_order_release); // 发布转发项
+// mutator 侧：
+addr = atomic_load_explicit(&fwd_table[i], memory_order_acquire);
+use(addr);   // 保证看到完整副本，绝不是"空房子"
+```
+
+如果发布用 relaxed，mutator 可能先看到转发项、再去读新地址时**内容还没写完**——教科书级的 publication bug。relaxed 唯一省下的是一条指令，赌注是偶发数据损坏。
+
+**3) good 色 / 相位发布 —— 站在 STW 的肩膀上。** 经典 ZGC 只在 STW（Mark Start / Relocate Start）翻转 good 色。线程进出 safepoint 的握手本身建立 happens-before，所以**换色免费获得全线程可见**；并发阶段内 good 色是**只读常量**，读屏障快路径连 acquire 都不需要（读一个不变量的普通缓存款也无害）。这是"把相位切换收在 STW 里"的一条隐性收益：**省掉的不只是停顿设计，还有内存序证明**。
+
+**4) 标记栈 / 工作队列 —— push 用 release、pop 用 acquire。** GC 线程 A 扫完对象把新灰对象压栈，线程 B 弹出来扫。push 时先填好节点内容再 release 更新栈顶指针，pop 时 acquire 读栈顶再取内容——配对错了，B 可能弹出"还没填完的节点"，扫出野指针。与 §14.3 的发布模式一模一样，只是"发布的东西"从对象变成了工作项。
+
+**5) 统计与水位 —— relaxed 足够。** 分配字节数、标记进度、启发式触发阈值，这些**只加不减、只用于决策**的计数没有伴生数据需要捆绑可见。用 acquire/release 是浪费，用 seq_cst 是浪费加倍。
+
+一个速记判断法：**问自己"这个原子量旁边有没有普通数据要跟着一起可见？"** 没有 → relaxed；有 → release（写侧）+ acquire（读侧）；既是读又是写的裁决点 → acq_rel；需要所有人观点一致 → seq_cst。
+
+### 14.6 同一行 C 代码，两种 CPU 两种代价
+
+| C11 操作 | x86-64（TSO） | AArch64 |
+|----------|----------------|---------|
+| relaxed load / store | `MOV` | `LDR` / `STR` |
+| acquire load | `MOV` | `LDAR` |
+| release store | `MOV` | `STLR` |
+| acq_rel CAS | `LOCK CMPXCHG` | `LDAXR`/`STLXR` 循环 |
+| seq_cst load | `MOV` | `LDAR` |
+| seq_cst store | `MOV` + `MFENCE`（或 `XCHG`） | `STLR` |
+| `atomic_thread_fence(seq_cst)` | `MFENCE` | `DMB ISH` |
+
+看 x86 那一列你会发现：**acquire/release 在 x86 上就是普通 MOV，免费**。这是因为 x86 是强内存模型（TSO）：store 之间不重排、load 之间不重排、load 不会越过更早的 store 之外……**唯一允许的重排就是"读越过自己前面的写"**（§14.2 实验二那种）。所以：
+
+- 发布模式在 x86 上"碰巧"总是对的——**同样的二进制思维搬到 ARM 上就间歇性崩**；
+- x86 上"测过了没问题"不能作为内存序正确的证据；**正确性只能从 C11 规则推导，不能从某平台跑通归纳**；
+- AArch64 的 `LDAR`/`STLR` 是轻量同步指令，acquire/release 配对在 ARM 上也便宜；真正贵的是 seq_cst fence。**能在 acquire/release 层面解决的，不要升级到 seq_cst**（性能），但**该 seq_cst 的别用 acquire/release 硬凑**（正确性）。
+
+### 14.7 三条军规 + 怎么验证
+
+1. **共享可变量一律原子类型**。普通类型出现冲突访问就是 UB，别赌"这只是个 flag"——赌注是整个程序语义。
+2. **发布用 release、消费用 acquire，且必须落在同一个原子变量上配对**。写代码时先画一条线：谁发布、谁签收、在哪签收。
+3. **拿不准就 seq_cst**：先保证对，再谈快；profile 指出热点后再降级，每次降级写清理由注释。
+
+验证手段与分工：
+
+- **TSan（ThreadSanitizer）**：按 happens-before 模型分析，专抓"缺 synchronizes-with"的访问对——正是上面第 1、2 条军规的自动检查。xgc 将其作为强制门禁（doc 16 §8）。
+- **ASan**：抓内存错误（UAF/越界），**不抓顺序错误**，两者互补，都要跑。
+- **压测在弱序平台（ARM）上跑**才有意义：x86 的 TSO 会替你掩盖 StoreLoad 类 bug（§14.2 实验二在 x86 上只有这一类会暴露，其余全被硬件顺序挡住）。
+
+常见坑备忘：
+
+- **假依赖不可靠**：以为 `r = x; use(*r)` 有数据依赖就安全？编译器可以消除依赖——所以 `consume` 别用，老实用 acquire。
+- **double-checked locking**：第一查必须是 acquire，发布必须 acq_rel（或 seq_cst），否则两边都白搭。
+- **读侧不加原子**：写侧再讲究，读侧用普通读也可能撕裂/读到中间态。共享变量的**读写两侧**都要原子。
+
+到这一节为止，§9 的 `CAS(slot, v, healed)` 与 §12 的"先复制后发布转发"应该不再是"背下来的规则"，而是"能推出结果的定理"。
+
+---
+
+## 15. 从零实现一个 ZGC：最小可行路线
 
 > 目标：不要一上来就挑战并发。按下面顺序，每一步的产物都能跑、可测、可交付，再逐步替换。
 
@@ -469,7 +640,8 @@ ZGC 的一切都要求**精确式 GC**：运行时必须确切知道"哪里是�
 - Relocate Start（STW）选 CSet、搬根；
 - 并发搬 CSet 对象，安装转发表（CAS）；
 - 读屏障慢路径：遇坏色→查/补转发→自愈写回；
-- 清空 region 归还空闲表；下一轮 Mark Start 兼任 Remap。
+- 清空 region 归还空闲表；下一轮 Mark Start 兼任 Remap；
+- 内存序按 §14.5 的五个点位逐一核对（CAS acq_rel / 先复制后 release 发布 / 队列 push-pop 配对 / 计数 relaxed）。
 - 验收：持续高并发下长时间运行，最终堆内所有引用自洽、无旧地址残留、无数据竞争（用 TSan 把关，参见仓库
   [implementation-guide/17-正确性验证与压力测试.md](../implementation-guide/17-正确性验证与压力测试.md)）。
 
@@ -498,12 +670,12 @@ forwarding_t* forward_table[ /*region数*/ ];
 
 - **差分测试**：与一个简单可靠的"影子 GC/标记"比对存活集，任何不一致即 bug。
 - **压力/随机图**：随机建/断引用、随机触发 GC，配合并发线程。
-- **Sanitizer**：ASan（内存）/ TSan（数据竞争）/ UBSan。参见
+- **Sanitizer**：ASan（内存）/ TSan（数据竞争）/ UBSan。内存序的军规与陷阱见 §14.7。参见
   [implementation-guide/16-并发正确性与内存模型.md](../implementation-guide/16-并发正确性与内存模型.md)。
 
 ---
 
-## 15. 术语速查表
+## 16. 术语速查表
 
 | 术语 | 含义 |
 |------|------|
@@ -522,10 +694,19 @@ forwarding_t* forward_table[ /*region数*/ ];
 | Remapped | 已重定位的标记位 |
 | 转发表（Forwarding） | 旧地址 → 新地址的映射 |
 | Remap | 重定位后更新引用；ZGC 惰性并入下一轮标记 |
+| happens-before（先于发生） | C11 可见性的正式凭据：程序序 + synchronizes-with 的传递闭包 |
+| synchronizes-with（同步于） | acquire 读到同一变量上 release 写入的值 ⇒ 建立跨线程可见性 |
+| modification order（修改序） | 单个原子变量全部写的全序，所有线程一致（relaxed 也保证） |
+| `relaxed` | 只保原子性与本变量修改序，不建立跨变量顺序（计数器用） |
+| `acquire` / `release` | 读侧不提前 / 写侧不延后，须在同一原子变量上配对（发布模式） |
+| `acq_rel` | RMW 专用：读侧 acquire + 写侧 release（自愈/变色 CAS 用） |
+| `seq_cst` | 额外保证全体一致的单一全序；最强也最贵，拿不准时的保守档 |
+| 数据竞争（data race） | 非原子冲突访问且无 happens-before 隔开，C11 下为未定义行为 |
+| store buffer / TSO | 写先入核心私有缓冲；x86 TSO 只允许"读越过自己前面的写"重排 |
 
 ---
 
-## 16. 延伸阅读与参考
+## 17. 延伸阅读与参考
 
 - **仓库内（xgc）**：
   - `implementation-guide/20-并发重定位读屏障与指针染色.md`：与本文同构的工程实现细则；
@@ -534,6 +715,7 @@ forwarding_t* forward_table[ /*region数*/ ];
   - `implementation-guide/22-术语表与FAQ.md`：FAQ。
 - **OpenJDK**：`-XX:+UseZGC`，ZGC 源码在 `hotspot/src/hotspot/share/gc/z/`；
 - **JEP**：JEP 333（引入）、JEP 377（转正）、JEP 439（分代 ZGC）；
+- **内存模型**：C11 标准 §5.1.2.4 / §7.17（`<stdatomic.h>`）；cppreference "Memory order" 条目；Preshing on Programming 的内存序系列（发布/签收比喻的经典出处）；Intel SDM Vol.3 第 11 章与 ARM Architecture Reference Manual 的内存模型章节（平台视角）；TSan 官方 wiki（happens-before 检测原理）；
 - **经典讲解**：可检索 "ZGC 彩色指针 / multi-mapping / self-healing load barrier" 相关论文与博客，概念一致。
 
 > 附图源文件均在 `figures/` 下，修改 `.puml` 后可用 `plantuml -tpng x.puml` 重新生成。唯一需要留意的是中文渲染字体（本仓库使用 WenQuanYi Micro Hei）。

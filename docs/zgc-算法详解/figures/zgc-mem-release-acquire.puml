@@ -1,0 +1,18 @@
+@startuml
+title release / acquire 配对：一次「发布 — 签收」
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+participant "线程 A（生产者）" as A
+participant "原子变量 flag" as F
+participant "线程 B（消费者）" as B
+A -> A : data = 42\n（普通写：先把数据准备好）
+A -> F : store(flag, 1, release)\n「打包发货」：之前的所有写\n不许沉到这条之后
+F -> B : load(flag) == 1（acquire）\n「签收」：读到的正是 A 那次写入
+B -> B : 读 data\n保证看到 42
+note over A, B
+  synchronizes-with：B 的 acquire 读到了 A 的 release 写入的值
+  ⇒ A 在 release 之前的全部写，对 B 在 acquire 之后的读可见
+  （happens-before 已建立；若 store 用 relaxed，则无此保证）
+end note
+@enduml

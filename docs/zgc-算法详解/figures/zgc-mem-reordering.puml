@@ -1,0 +1,18 @@
+@startuml
+title 没有内存序约束时：两个线程可以「互相都没看见」
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam defaultFontSize 13
+skinparam backgroundColor white
+participant "线程 1" as T1
+participant "共享变量 x / y" as S
+participant "线程 2" as T2
+T1 -> S : x = 1\n（先进自己的 store buffer）
+T2 -> S : y = 1\n（同样先进自己的 store buffer）
+T1 -> S : r1 = y → 读到 0\n（自己的写还没传播，对方的写还没到）
+T2 -> S : r2 = x → 读到 0
+note over T1, T2
+  StoreLoad 重排：load 可以先于自己前面的 store 生效
+  结果 r1 == 0 且 r2 == 0——单线程看各自代码「不可能出现」
+  x86-64(TSO) 同样允许这种重排；只有 seq_cst / fence 能禁止
+end note
+@enduml
